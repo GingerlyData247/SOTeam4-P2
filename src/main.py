@@ -43,7 +43,6 @@ def get_env_values():
     return {
         "S3_BUCKET": os.getenv("S3_BUCKET"),
         "AWS_REGION": os.getenv("AWS_REGION"),
-        "DATABASE_URL": os.getenv("DATABASE_URL"),
     }
 
 
