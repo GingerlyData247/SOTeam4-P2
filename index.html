@@ -80,7 +80,6 @@
         border-radius: 8px;
         overflow-x: auto;
       }
-
       #models-container {
         margin-top: 1rem;
       }
@@ -111,9 +110,10 @@
       <input
         id="urlInput"
         type="text"
-		placeholder="facebook/wav2vec2-base or HF URL"
-        //placeholder="https://github.com/pytorch/fairseq"
+        placeholder="facebook/wav2vec2-base or HF URL"
       />
+      <!-- placeholder example: https://github.com/pytorch/fairseq -->
+
       <button onclick="analyzeUrl()">Analyze</button>
 
       <h2>Results</h2>
@@ -133,92 +133,108 @@
     <footer>© 2025 Team 4 • Purdue ECE/SWE 45000 • Phase 2</footer>
 
     <script>
-	  const API_BASE = "https://c1r52eygxi.execute-api.us-east-2.amazonaws.com/api";
+      const API_BASE =
+        "https://c1r52eygxi.execute-api.us-east-2.amazonaws.com/api";
 
-	  async function analyzeUrl() {
-		const url = document.getElementById("urlInput").value.trim();
-		const out = document.getElementById("output");
-		if (!url) {
-		  out.textContent = "Please enter a valid URL.";
-		  return;
-		}
+      async function analyzeUrl() {
+        const url = document.getElementById("urlInput").value.trim();
+        const out = document.getElementById("output");
+        if (!url) {
+          out.textContent = "Please enter a valid URL.";
+          return;
+        }
 
-		out.textContent = "Processing...";
-		try {
-		  // POST to /api/score with the Phase 2-style payload
-		  const res = await fetch(`${API_BASE}/score`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ urls: [url] }),
-		  });
+        out.textContent = "Processing...";
 
-		  if (!res.ok) {
-			const text = await res.text();
-			out.textContent = `Error ${res.status}: ${text}`;
-			return;
-		  }
+        try {
+          // Build ?model_ref=<url> for the ingest endpoint
+          const params = new URLSearchParams({ model_ref: url });
 
-		  const data = await res.json();
-		  out.textContent = JSON.stringify(data, null, 2);
-		} catch (err) {
-		  out.textContent = "Error: " + err.message;
-		}
-	  }
+          const res = await fetch(
+            `${API_BASE}/ingest?${params.toString()}`,
+            {
+              method: "POST", // no JSON body, no extra headers
+            }
+          );
 
-	  // --- Registry search + pagination ---
+          if (!res.ok) {
+            const text = await res.text();
+            try {
+              const parsed = JSON.parse(text);
+              out.textContent = `Error ${res.status}: ${
+                parsed.detail ?? text
+              }`;
+            } catch {
+              out.textContent = `Error ${res.status}: ${text}`;
+            }
+            return;
+          }
 
-	  let cursor = null; // for pagination
-	  let currentQuery = "";
+          const data = await res.json();
+          out.textContent = JSON.stringify(data, null, 2);
+        } catch (err) {
+          console.error(err);
+          out.textContent = "Error: " + err.message;
+        }
+      }
 
-	  async function fetchModels(query = "", append = false) {
-		const params = new URLSearchParams({ limit: 10 });
-		if (query) params.append("q", query);
-		if (cursor) params.append("cursor", cursor);
+      // --- Registry search + pagination ---
+      let cursor = null; // for pagination
+      let currentQuery = "";
 
-		const resp = await fetch(`${API_BASE}/models?${params.toString()}`);
-		if (!resp.ok) {
-		  console.error("Failed to fetch models", resp.status);
-		  return;
-		}
+      async function fetchModels(query = "", append = false) {
+        const params = new URLSearchParams({ limit: 10 });
+        if (query) params.append("q", query);
+        if (cursor) params.append("cursor", cursor);
 
-		const data = await resp.json();
-		const container = document.getElementById("models-container");
+        const resp = await fetch(`${API_BASE}/models?${params.toString()}`);
+        if (!resp.ok) {
+          console.error("Failed to fetch models", resp.status);
+          return;
+        }
 
-		if (!append) container.innerHTML = "";
+        const data = await resp.json();
+        const container = document.getElementById("models-container");
 
-		data.items.forEach((model) => {
-		  const div = document.createElement("div");
-		  div.className = "model-card";
-		  div.innerHTML = `
-			<strong>${model.name}</strong><br>
-			<small>${model.card_summary || "(no summary)"}</small>
-		  `;
-		  container.appendChild(div);
-		});
+        if (!append) container.innerHTML = "";
 
-		// handle pagination
-		cursor = data.next_cursor || null;
-		document.getElementById("load-more-btn").style.display = cursor
-		  ? "inline-block"
-		  : "none";
-	  }
+        (data.items || []).forEach((model) => {
+          const div = document.createElement("div");
+          div.className = "model-card";
+          div.innerHTML =
+            "<strong>" +
+            model.name +
+            "</strong><br>" +
+            "<small>" +
+            (model.card_summary || "(no summary)") +
+            "</small>";
+          container.appendChild(div);
+        });
 
-	  document.getElementById("search-btn").addEventListener("click", () => {
-		cursor = null;
-		currentQuery = document.getElementById("search-input").value;
-		fetchModels(currentQuery, false);
-	  });
+        // handle pagination
+        cursor = data.next_cursor || null;
+        document.getElementById("load-more-btn").style.display = cursor
+          ? "inline-block"
+          : "none";
+      }
 
-	  document.getElementById("load-more-btn").addEventListener("click", () => {
-		fetchModels(currentQuery, true);
-	  });
+      document
+        .getElementById("search-btn")
+        .addEventListener("click", () => {
+          cursor = null;
+          currentQuery =
+            document.getElementById("search-input").value;
+          fetchModels(currentQuery, false);
+        });
 
-	  // initial load
-	  fetchModels();
-</script>
+      document
+        .getElementById("load-more-btn")
+        .addEventListener("click", () => {
+          fetchModels(currentQuery, true);
+        });
 
+      // initial load
+      fetchModels();
+    </script>
   </body>
 </html>
-
-
-
