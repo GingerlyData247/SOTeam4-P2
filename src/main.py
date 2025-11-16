@@ -20,7 +20,7 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,      # or ["*"] if you want it totally open
+    allow_origins=["*"],      # or ["*"] if you want it totally open
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
