@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()  # load .env early
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 
 from src.api.routers import models as models_router
@@ -20,7 +21,8 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],      # or ["*"] if you want it totally open
+    allow_origins=["*"],      # keep wide-open while debugging
+    # or use: allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -30,9 +32,11 @@ app.add_middleware(
 app.include_router(models_router.router, prefix="/api")
 app.include_router(s3_router)  # routes_s3 defines prefix="/api/s3"
 
+
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
 
 @app.get("/api/env")
 def get_env_values():
@@ -41,6 +45,7 @@ def get_env_values():
         "AWS_REGION": os.getenv("AWS_REGION"),
         "DATABASE_URL": os.getenv("DATABASE_URL"),
     }
+
 
 # Single Lambda entrypoint
 handler = Mangum(app)
