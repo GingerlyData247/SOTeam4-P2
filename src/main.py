@@ -11,6 +11,21 @@ from src.api.routes_s3 import router as s3_router  # mounts /api/s3/*
 
 app = FastAPI(title="SOTeam4P2 API")
 
+# --- CORS setup ---
+# While debugging you can use ["*"]. For production, limit to your S3 website.
+origins = [
+    "http://sot4-model-registry-dev.s3-website.us-east-2.amazonaws.com",
+    "https://sot4-model-registry-dev.s3-website.us-east-2.amazonaws.com",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,      # or ["*"] if you want it totally open
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Mount everything under /api
 app.include_router(models_router.router, prefix="/api")
 app.include_router(s3_router)  # routes_s3 defines prefix="/api/s3"
