@@ -1,15 +1,10 @@
 from __future__ import annotations
-from typing import Optional, List, Dict, Any
-from ..repositories.models_repo import InMemoryRepo
-from ..schemas.models import ModelCreate, ModelUpdate, ModelOut, Page
-from .storage import LocalStorage
+from typing import List, Dict, Any
 import uuid
-
 
 class RegistryService:
     def __init__(self):
-        # ⭐ REQUIRED ⭐
-        # Internal list to hold all stored model entries
+        # Internal in-memory list
         self._models: List[Dict[str, Any]] = []
 
     def create(self, m):
@@ -18,9 +13,9 @@ class RegistryService:
             "name": m.name,
             "version": m.version,
             "metadata": m.metadata or {
-                "card": m.card if hasattr(m, "card") else "",
-                "tags": m.tags if hasattr(m, "tags") else [],
-                "source_uri": m.source_uri if hasattr(m, "source_uri") else None,
+                "card": getattr(m, "card", ""),
+                "tags": getattr(m, "tags", []),
+                "source_uri": getattr(m, "source_uri", None),
             },
         }
         self._models.append(entry)
@@ -55,6 +50,4 @@ class RegistryService:
 
     def reset(self):
         self._models = []
-        
-    def count_models(self) -> int:
-        return self.repo.count()
+
