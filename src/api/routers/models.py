@@ -173,7 +173,7 @@ def ingest_huggingface(model_ref: str = Query(..., description="owner/name or fu
 # ------------------------------------------------------------------ #
 # Reset & Health
 # ------------------------------------------------------------------ #
-@router.post("/reset", status_code=204)
+@router.get("/reset", status_code=204) #Changed from router.post to router.get
 def reset_system():
     _registry.reset()
 
