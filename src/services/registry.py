@@ -112,6 +112,9 @@ class RegistryService:
 
         return len(self._models) < before
 
+    def count_models(self) -> int:
+        return len(self._models)
+
     # ------------------------------------------------------------------ #
     # RESET — CRITICAL FOR AUTOGRADER
     # ------------------------------------------------------------------ #
@@ -126,3 +129,5 @@ class RegistryService:
         self._index = {}
         self._order = []
         self._cursor_map = {}
+
+
