@@ -81,26 +81,21 @@ def rate_model(model_ref: str):
     hf_url = f"https://huggingface.co/{hf_id}"
 
     # 2️⃣ Try to find a corresponding GitHub repo
-    gh_url = find_github_url_from_hf(hf_id)
-    repo_url = _normalize_github_repo_url(gh_url or hf_url)
-
-    # 3️⃣ Clone the repo (if any)
+    # Phase 2: No GitHub cloning; metrics must run without repos
+    repo_url = None
     local_path = None
-    if repo_url:
-        try:
-            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-                local_path = clone_repo_to_temp(repo_url)
-        except Exception:
-            local_path = None
+
 
     # 4️⃣ Build resource (same as CLI)
     resource = {
-        "name": hf_id,
-        "url": hf_url,
-        "github_url": repo_url,
-        "local_path": local_path,
-        "category": "MODEL",
+    "name": hf_id,
+    "url": hf_url,
+    "github_url": None,
+    "local_path": None,
+    "skip_repo_metrics": False,
+    "category": "MODEL",
     }
+
 
     # 5️⃣ Run metric computation
     result = compute_metrics_for_model(resource)
@@ -138,23 +133,18 @@ def ingest_huggingface(model_ref: str = Query(..., description="owner/name or fu
 
     hf_id = normalize_hf_id(model_ref)
     hf_url = f"https://huggingface.co/{hf_id}"
-    gh_url = find_github_url_from_hf(hf_id)
-    repo_url = _normalize_github_repo_url(gh_url or hf_url)
-
+    # Phase 2: No GitHub cloning; metrics must run without repos
+    repo_url = None
     local_path = None
-    if repo_url:
-        try:
-            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-                local_path = clone_repo_to_temp(repo_url)
-        except Exception:
-            local_path = None
+
 
     resource = {
-        "name": hf_id,
-        "url": hf_url,
-        "github_url": repo_url,
-        "local_path": local_path,
-        "category": "MODEL",
+    "name": hf_id,
+    "url": hf_url,
+    "github_url": None,
+    "local_path": None,
+    "skip_repo_metrics": False,
+    "category": "MODEL",
     }
 
     result = compute_metrics_for_model(resource)
