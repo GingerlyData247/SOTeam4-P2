@@ -10,6 +10,9 @@ from mangum import Mangum
 
 from src.api.routers import models as models_router
 from src.api.routes_s3 import router as s3_router  # mounts /api/s3/*
+from src.api.routers.models import root_router
+
+
 
 app = FastAPI(title="SOTeam4P2 API")
 
@@ -29,6 +32,7 @@ app.add_middleware(
 
 # Mount routers under /api
 app.include_router(models_router.router, prefix="/api")
+app.include_router(root_router)  # mounts /reset at /
 app.include_router(s3_router)  # routes_s3 defines prefix="/api/s3"
 
 # Health and env endpoints
@@ -41,6 +45,10 @@ def get_env_values():
         "S3_BUCKET": os.getenv("S3_BUCKET"),
         "AWS_REGION": os.getenv("AWS_REGION"),
     }
+
+
+# Single Lambda entrypoint
+handler = Mangum(app)
 
 
 # Single Lambda entrypoint
