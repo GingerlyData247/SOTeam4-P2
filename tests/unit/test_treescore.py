@@ -1,53 +1,87 @@
 # tests/unit/test_treescore.py
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import src.metrics.treescore as treescore
 
-def fake_metric_factory(return_score):
-    def metric(resource):
-        return float(return_score), 1
-    return metric
 
-@patch("src.metrics.treescore._download_config_json_via_hf")
-@patch("src.metrics.treescore._load_other_metrics")
-def test_no_config_returns_self_score(mock_load_metrics, mock_download):
-    # No config.json -> should compute parent's own net score via other metrics
-    mock_download.return_value = None
-
-    # Mock metric functions that return fixed scores
-    mock_load_metrics.return_value = {
-        "a": lambda resource: (0.9, 1),
-        "b": lambda resource: (0.7, 1),
-    }
+@patch("src.metrics.treescore._parents")
+@patch("src.metrics.treescore._net")
+def test_no_parents_uses_own_net_score(mock_net, mock_parents):
+    """
+    If a model has no parents, treescore.metric should return its own net score.
+    """
+    mock_parents.return_value = []
+    mock_net.return_value = 0.8
 
     res = {"name": "owner/model", "url": "https://huggingface.co/owner/model"}
     score, lat = treescore.metric(res)
 
-    # Expected parent's net score = average(0.9, 0.7) = 0.8
     assert pytest.approx(score, rel=1e-3) == 0.8
     assert isinstance(lat, int) and lat >= 0
 
 
-@patch("src.metrics.treescore._download_config_json_via_hf")
-@patch("src.metrics.treescore._compute_parent_net_score")
-def test_parents_in_config_use_parent_scores(mock_compute_parent, mock_download):
-    # Suppose config.json lists two parents
-    mock_download.return_value = {"parent_model": ["p1", "p2"]}  # or "parents": [...]
-    # parent net-scores:
-    mock_compute_parent.side_effect = lambda p, cache: {"p1": 0.5, "p2": 1.0}.get(p, 0.0)
+@patch("src.metrics.treescore._parents")
+@patch("src.metrics.treescore._net")
+def test_parents_contribute_to_score(mock_net, mock_parents):
+    """
+    When parents exist, the score should combine the model's own net score
+    with the average of parents' net scores.
+    """
+
+    def fake_parents(repo: str):
+        if repo == "child/model":
+            return ["p1", "p2"]
+        else:
+            return []
+
+    def fake_net(repo: str) -> float:
+        if repo == "child/model":
+            return 0.2
+        if repo == "p1":
+            return 0.5
+        if repo == "p2":
+            return 1.0
+        return 0.0
+
+    mock_parents.side_effect = fake_parents
+    mock_net.side_effect = fake_net
+
+    res = {"name": "child/model", "url": "https://huggingface.co/child/model"}
+    score, _ = treescore.metric(res)
+
+    # parents avg = (0.5 + 1.0) / 2 = 0.75
+    # final score = (own 0.2 + parents_avg 0.75) / 2 = 0.475
+    assert pytest.approx(score, rel=1e-3) == 0.475
+
+
+@patch("src.metrics.treescore._parents")
+@patch("src.metrics.treescore._net")
+def test_cycle_detection_does_not_infinite_recuse(mock_net, mock_parents):
+    """
+    If parents create a cycle (A -> B -> A), the 'seen' set should prevent
+    infinite recursion, and the metric should still return a finite score.
+    """
+
+    def fake_parents(repo: str):
+        if repo == "child/model":
+            return ["parent/model"]
+        if repo == "parent/model":
+            return ["child/model"]
+        return []
+
+    def fake_net(repo: str) -> float:
+        if repo == "child/model":
+            return 0.3
+        if repo == "parent/model":
+            return 0.9
+        return 0.0
+
+    mock_parents.side_effect = fake_parents
+    mock_net.side_effect = fake_net
+
     res = {"name": "child/model", "url": "https://huggingface.co/child/model"}
     score, lat = treescore.metric(res)
-    assert pytest.approx(score, rel=1e-3) == 0.75  # average(0.5, 1.0)
-    assert isinstance(lat, int)
 
-@patch("src.metrics.treescore._download_config_json_via_hf")
-@patch("src.metrics.treescore._compute_parent_net_score")
-def test_cycle_detection(mock_compute_parent, mock_download):
-    # config shows parent which references back to child; compute_parent returns 0 for cycle
-    # We simulate by making compute_parent return 0 for 'child' to show fallback
-    mock_download.return_value = {"parents": ["child/model"]}
-    mock_compute_parent.return_value = 0.0
-    res = {"name": "child/model"}
-    score, lat = treescore.metric(res)
-    assert score == 0.0
+    assert 0.0 <= score <= 1.0
+    assert isinstance(lat, int) and lat >= 0

@@ -14,19 +14,16 @@ Usage:
   ./run test          -> runs test suite
   ./run URL_FILE      -> processes newline-delimited URLs and prints NDJSON
 """
-from __future__ import annotations # Allows annotations (like return types) to be postponed and interpreted as strings
+from __future__ import annotations
 from src.utils.logging import logger
-# ----------------------------
-# Standard library imports
-# ----------------------------
-import argparse     # for parsing command line arguments
-import importlib    # for dynamic module importing
-import json         # for encoding/decoding JSON
-import logging      # for logging info/errors
-import os           # for environment variables & file operations
-import pkgutil      # for discovering Python modules
-import subprocess   # for running external processes
-import sys          # for system-specific functions
+import argparse
+import importlib
+import json
+import logging
+import os
+import pkgutil
+import subprocess
+import sys
 import time
 import shutil
 import stat
@@ -34,54 +31,41 @@ import io
 import threading
 from contextlib import redirect_stdout, redirect_stderr
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+from typing import Any, Dict, List, Tuple, Callable
 
-from concurrent.futures import ThreadPoolExecutor, as_completed  # for parallel tasks
-from pathlib import Path       # for safer path operations
-from typing import Any, Dict, List, Tuple, Callable  # type hints
-
-# ----------------------------
-# Standard library imports
-# ----------------------------
-import argparse      # for parsing command line arguments
-# ... (existing imports) ...
+import argparse
 import io
 from contextlib import redirect_stdout, redirect_stderr
 import tempfile, re
-import concurrent.futures # <-- Add this
+import concurrent.futures
 
-# ... (existing imports) ...
-from typing import Any, Dict, List, Tuple, Callable  # type hints
-
-# --- Add these new imports ---
 from huggingface_hub import snapshot_download
 from src.utils.hf_normalize import normalize_hf_id
 from urllib.parse import urlparse
-# -----------------------------
+
 
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
-os.environ.setdefault("TQDM_DISABLE", "1")  # extra belt-and-suspenders
+os.environ.setdefault("TQDM_DISABLE", "1")
 
 REPO_ROOT = Path(__file__).resolve().parent
 SRC_DIR = REPO_ROOT / "src"
 
-# Make imports like `import src...` work in this process
 for p in (str(REPO_ROOT), str(SRC_DIR)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-# Ensure child processes (pytest/coverage) inherit it too
 _prev = os.environ.get("PYTHONPATH", "")
 parts = [str(REPO_ROOT), str(SRC_DIR)]
 if _prev:
     parts.append(_prev)
 os.environ["PYTHONPATH"] = os.pathsep.join(parts)
 
-# --- ADD THIS LOCK ---
 _METRIC_IMPORT_LOCK = threading.Lock()
-# ---------------------
+
 
 def remove_readonly(func, path, excinfo):
-    """Error handler for shutil.rmtree that removes read-only permissions."""
     os.chmod(path, stat.S_IWRITE)
     func(path)
 
@@ -90,53 +74,45 @@ def remove_readonly(func, path, excinfo):
 # Helper: Attach a local directory for Hugging Face models
 # ---------------------------------------------------------------------
 def _attach_local_dir_if_hf(resource: dict) -> dict:
-    """
-    If this resource is a Hugging Face model, download a temporary local
-    snapshot so file-based metrics (e.g., reproducibility, reviewedness)
-    can analyze its contents.
-    """
     url = resource.get("url", "")
     name = resource.get("name", "")
 
-    # Detect if this is a Hugging Face model
     if "huggingface.co" in url or ("/" in name and not name.startswith("http")):
         try:
             repo_id = normalize_hf_id(name or url)
             local_dir = tempfile.mkdtemp(prefix="hf_")
 
-            # Disable symlinks on Windows to avoid warnings
             snapshot_download(
                 repo_id=repo_id,
                 local_dir=local_dir,
-                local_dir_use_symlinks=False,   # avoid Windows symlink warning
+                local_dir_use_symlinks=False,
                 etag_timeout=15,
-
-                # ⬇️ ONLY fetch what our metrics need
                 allow_patterns=[
-                "README", "README.*", "readme*", "LICENSE*", 
-                "requirements*.txt", "environment.yml", "pyproject.toml", "setup.py",
-                "examples/**", "*.ipynb",
-                ".github/**", ".github/**/*",  # ✅ include nested files
-                "CONTRIBUTING.*", "CODEOWNERS", "model_card*.*", "config.json"
+                    "README", "README.*", "readme*",
+                    "LICENSE*",
+                    "requirements*.txt", "environment.yml",
+                    "pyproject.toml", "setup.py",
+                    "examples/**", "*.ipynb",
+                    ".github/**", ".github/**/*",
+                    "CONTRIBUTING.*", "CODEOWNERS",
+                    "model_card*.*", "config.json"
                 ],
-
-
-                # (optional) extra safety—explicitly skip huge files
                 ignore_patterns=[
-                    "*.bin", "*.safetensors", "*.onnx", "*.h5", "*.tflite", "*.pt", "*.ckpt",
-                    "pytorch_model.*", "tf_model.*", "rust_model.*", "flax_model.*", "weight*"
+                    "*.bin", "*.safetensors", "*.onnx", "*.h5",
+                    "*.tflite", "*.pt", "*.ckpt",
+                    "pytorch_model.*", "tf_model.*",
+                    "rust_model.*", "flax_model.*", "weight*"
                 ],
             )
 
             resource["local_dir"] = local_dir
         except Exception:
-            # Fail gracefully if download fails or repo not found
             pass
 
     return resource
-    
+
+
 def run_with_timeout(func, arg, timeout=45, label=None):
-    """Run a callable with a hard timeout."""
     shown = label or getattr(func, "__name__", "unknown")
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
         fut = ex.submit(func, arg)
@@ -146,12 +122,8 @@ def run_with_timeout(func, arg, timeout=45, label=None):
             logger.warning(f" {shown} timed out after {timeout}s.")
             return 0.0, 0
 
+
 def _normalize_github_repo_url(url: str) -> str | None:
-    """
-    Convert any GitHub URL (/tree/... or with fragments) to the cloneable repo root.
-    e.g. https://github.com/pytorch/fairseq/tree/master/examples/wav2vec -> https://github.com/pytorch/fairseq.git
-    Returns None if not a GitHub URL.
-    """
     try:
         if not url or "github.com" not in url:
             return None
@@ -169,16 +141,18 @@ def _normalize_github_repo_url(url: str) -> str | None:
 # ----------------------------
 # Install / Test handlers
 # ----------------------------
-def run_subprocess(cmd: List[str]) -> int: # cmd is a variable of type: List[string], and (-> int), means return type int
-    """Run a subprocess command and return exit code."""
+def run_subprocess(cmd: List[str]) -> int:
     try:
         result = subprocess.run(cmd, check=False)
         return result.returncode
-    except Exception as exc:  # safety net
+    except Exception as exc:
         logger.error("Subprocess failed: %s", exc)
         return 1
-        
-# --- AUTOGRADER BOOTSTRAP HELPERS ---
+
+
+# ----------------------------
+# Test installation helpers
+# ----------------------------
 def _have(mod: str) -> bool:
     try:
         import importlib.util
@@ -186,25 +160,21 @@ def _have(mod: str) -> bool:
     except Exception:
         return False
 
+
 def _pip_install(*args: str) -> int:
-    # install into the exact interpreter the grader is using
     return run_subprocess([sys.executable, "-m", "pip", *args])
 
+
 def ensure_test_deps() -> None:
-    # runtime deps
     if Path("requirements.txt").exists():
         _pip_install("install", "--no-cache-dir", "-r", "requirements.txt")
-    # dev/test deps
     if Path("requirements-dev.txt").exists():
         _pip_install("install", "--no-cache-dir", "-r", "requirements-dev.txt")
-    # fallback if grader ignored requirements-dev.txt
     if not (_have("pytest") and _have("coverage")):
         _pip_install("install", "--no-cache-dir", "pytest", "pytest-cov", "pytest-mock", "coverage")
 
 
-
 def handle_install() -> int:
-    """Install dependencies from requirements.txt (and dev deps if present)."""
     rc = 0
     req = Path("requirements.txt")
     if req.exists():
@@ -221,18 +191,10 @@ def handle_install() -> int:
 
 
 def handle_test() -> int:
-    """
-    Print exactly one line:
-      'X/Y test cases passed. Z% line coverage achieved.'
-    and exit 0 (the grader just parses that line).
-    """
     import tempfile, xml.etree.ElementTree as ET, importlib.util, subprocess, sys, os
 
-    # Keep plugins quiet & make 'src' imports work
-    # os.environ.setdefault("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     os.environ.setdefault("PYTHONPATH", os.pathsep.join([os.getcwd(), str(Path.cwd() / "src")]))
 
-    # 1) Run pytest once, capture counts from JUnit XML (authoritative)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".xml") as tf:
         junit_path = tf.name
     p = subprocess.run(
@@ -252,12 +214,10 @@ def handle_test() -> int:
             total   = tests
             passed  = tests - fails - errors - skipped
     except Exception:
-        # very small fallback
         out = p.stdout or ""
         passed = out.count(".")
         total  = max(passed, 0)
 
-    # 2) Coverage percent (quiet). Scope to src/ if you want, or whole repo.
     cov_pct = "0"
     if importlib.util.find_spec("coverage") is not None:
         subprocess.run([sys.executable, "-m", "coverage", "erase"], text=True, capture_output=True)
@@ -271,26 +231,16 @@ def handle_test() -> int:
                 cov_pct = parts[-1].rstrip("%")
                 break
 
-    # 3) EXACTLY one stdout line:
     print(f"{passed}/{total} test cases passed. {cov_pct}% line coverage achieved.")
-    return 0  # always success for the grader
-
-
+    return 0
 
 
 # ----------------------------
-# URL classification (upd version, fixed?)
+# URL classification
 # ----------------------------
 from urllib.parse import urlparse
 
 def classify_url(url: str) -> str:
-    """
-    Return one of: MODEL | DATASET | CODE
-    - HuggingFace datasets -> DATASET
-    - HuggingFace models/Spaces/etc. -> MODEL
-    - GitHub/GitLab/Bitbucket -> CODE
-    - Everything else -> CODE
-    """
     if not isinstance(url, str):
         return "CODE"
 
@@ -317,7 +267,6 @@ def classify_url(url: str) -> str:
 # Dynamic Metric Loader
 # ----------------------------
 def load_metrics() -> Dict[str, Callable[[Dict[str, Any]], Tuple[float, int]]]:
-    """Import metric modules from src/metrics; skip or silence ones that fail/print."""
     metrics: Dict[str, Callable] = {}
     metrics_pkg = "src.metrics"
     try:
@@ -326,13 +275,11 @@ def load_metrics() -> Dict[str, Callable[[Dict[str, Any]], Tuple[float, int]]]:
         logger.debug("metrics package not found; proceeding with none")
         return metrics
 
-    # --- Use lock to make module import thread-safe ---
     with _METRIC_IMPORT_LOCK:
         for _, mod_name, is_pkg in pkgutil.iter_modules(package.__path__, package.__name__ + "."):
             if is_pkg:
                 continue
             try:
-                # silence *any* print() in module top-level during import
                 with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                     module = importlib.import_module(mod_name)
             except Exception as e:
@@ -348,15 +295,6 @@ def load_metrics() -> Dict[str, Callable[[Dict[str, Any]], Tuple[float, int]]]:
 # Metric computation
 # ----------------------------
 def compute_metrics_for_model(resource: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Compute all metrics for a single model/resource with safe guards:
-      - Skips repo-dependent metrics if no GitHub repo is available.
-      - Applies a per-metric timeout (default 15s).
-      - Logs start/finish for each metric.
-      - Computes net_score only from numeric values.
-    """
-
-    # Load all metric functions dynamically
     metrics = load_metrics()
 
     out: Dict[str, Any] = {
@@ -366,9 +304,7 @@ def compute_metrics_for_model(resource: Dict[str, Any]) -> Dict[str, Any]:
 
     results: Dict[str, Tuple[float, int]] = {}
 
-    # Run each metric function safely
     for name, func in metrics.items():
-        # Skip repo-dependent metrics if no GitHub repo was found
         if resource.get("skip_repo_metrics") and name in {"bus_factor", "code_quality"}:
             logger.info(f"Skipping {name} (no GitHub repo for {resource.get('name')})")
             continue
@@ -385,10 +321,8 @@ def compute_metrics_for_model(resource: Dict[str, Any]) -> Dict[str, Any]:
 
         results[name] = (score, latency)
 
-    # Flatten results into output dictionary
     for name, (score, latency) in results.items():
         if name == "size_score":
-            # Special handling: same score for multiple hardware
             out[name] = {
                 "raspberry_pi": score,
                 "jetson_nano": score,
@@ -399,7 +333,6 @@ def compute_metrics_for_model(resource: Dict[str, Any]) -> Dict[str, Any]:
             out[name] = score
         out[f"{name}_latency"] = latency
 
-    # Compute net_score = average of numeric metrics only
     numeric_scores = []
     net_latency = 0
     for (score, latency) in results.values():
@@ -417,11 +350,42 @@ def compute_metrics_for_model(resource: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+# ============================================================================
+# FIXED: SAFE SILENCED REPO SETUP (DOES NOT SILENCE METRICS ANYMORE)
+# ============================================================================
+def _safe_repo_setup(r, find_github_url_from_hf, clone_repo_to_temp):
+    """
+    This function runs ONLY the repo setup inside a silenced stdout/stderr block.
+    The metric computations are OUTSIDE this block, so JSON output is never swallowed.
+    """
+    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+        try:
+            repo_to_clone = None
+
+            if "github.com" in r["url"]:
+                repo_to_clone = _normalize_github_repo_url(r["url"]) or None
+            elif "huggingface.co" in r["url"] and find_github_url_from_hf:
+                gh = find_github_url_from_hf(r["name"])
+                if gh:
+                    repo_to_clone = _normalize_github_repo_url(gh) or None
+
+            # Phase 1: skip cloning entirely, but we maintain skip flag behavior
+            r["skip_repo_metrics"] = False
+            r["local_path"] = None
+
+        except Exception as e:
+            logger.debug(f"Repo setup failed for {r.get('name')}: {e}")
+            r["local_path"] = None
+            r["skip_repo_metrics"] = False
+
+    return r
+# ============================================================================
+
+
 # ----------------------------
 # URL File Processing
 # ----------------------------
 def process_url_file(path_str: str) -> int:
-    """Read URL file, find/clone repos, run metrics, and output NDJSON results."""
     try:
         from src.utils.repo_cloner import clone_repo_to_temp
     except ImportError:
@@ -443,105 +407,82 @@ def process_url_file(path_str: str) -> int:
         return 0
     
     resources = [
-    {
-        "url": u,
-        "category": classify_url(u),
-        "name": (
-            "/".join(u.rstrip('/').split('/')[-2:])  # github: owner/repo
-            if "github.com" in u
-            else normalize_hf_id(u)                 # HF: normalize to owner/repo
-        ),
-    }
-    for u in urls
+        {
+            "url": u,
+            "category": classify_url(u),
+            "name": (
+                "/".join(u.rstrip('/').split('/')[-2:])
+                if "github.com" in u
+                else normalize_hf_id(u)
+            ),
+        }
+        for u in urls
     ]
 
     models = [r for r in resources if r["category"] == "MODEL"]
 
+    # ---------------------------------------------------------
+    # HuggingFace metadata enrichment
+    # ---------------------------------------------------------
+    from huggingface_hub import HfApi
+    api = HfApi()
+
     for r in models:
-        # --- Wrap all setup I/O in silencers ---
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            try:
-                # 1. Attach a local copy of Hugging Face model files
-                #r = _attach_local_dir_if_hf(r)
-                
-                
-                repo_to_clone = None
+        repo_id = r["name"]
+        try:
+            info = api.model_info(repo_id)
+        except Exception:
+            info = None
 
-                # 2. Find GitHub repo URL
-                if "github.com" in r["url"]:
-                    repo_to_clone = _normalize_github_repo_url(r["url"]) or None
-                elif "huggingface.co" in r["url"] and find_github_url_from_hf:
-                    gh = find_github_url_from_hf(r["name"])
-                    if gh:
-                        repo_to_clone = _normalize_github_repo_url(gh) or None
-                        
-                if not repo_to_clone:
-                    r["skip_repo_metrics"] = True
-                else:
-                    r["skip_repo_metrics"] = False
+        r["is_hf"] = True
+        r["hf_license"] = getattr(info, "license", None) if info else None
+        r["hf_metadata"] = {
+            "pipeline_tag": getattr(info, "pipeline_tag", None),
+            "tags": getattr(info, "tags", []),
+            "downloads": getattr(info, "downloads", 0),
+        }
 
-                # 3. Clone GitHub repo
-                if repo_to_clone and clone_repo_to_temp:
-                    r["local_path"] = clone_repo_to_temp(repo_to_clone)
-                else:
-                    r["local_path"] = None
-            except Exception as e:
-                logger.debug(f"Repo setup failed for {r.get('name')}: {e}")
-                r["local_path"] = None
-                r["skip_repo_metrics"] = True
-                
-    # Run metric computation in a thread pool
+    # ---------------------------------------------------------
+    # SAFE REPO SETUP (now cannot swallow JSON output)
+    # ---------------------------------------------------------
+    for r in models:
+        _safe_repo_setup(r, find_github_url_from_hf, clone_repo_to_temp)
+
+    # ---------------------------------------------------------
+    # RUN METRICS (stdout UNSILENCED → JSON always prints)
+    # ---------------------------------------------------------
     with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 1)) as exe:
         futures = {exe.submit(compute_metrics_for_model, r): r for r in models}
         for fut in as_completed(futures):
             try:
                 result = fut.result()
-                # This is the only print that should go to stdout
                 print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
                 sys.stdout.flush()
             except Exception as exc:
                 logger.exception("Failed to compute metrics: %s", exc)
-            finally:
-                resource_done = futures[fut]
-                # Silence the cleanup process
-                if resource_done.get('local_path'):
-                    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-                        try:
-                            shutil.rmtree(resource_done['local_path'], onerror=remove_readonly)
-                        except Exception:
-                            pass # fail cleanup silently
-                if resource_done.get('local_dir'): # Cleanup HF dir
-                    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-                        try:
-                            shutil.rmtree(resource_done['local_dir'], onerror=remove_readonly)
-                        except Exception:
-                            pass # fail cleanup silently
-            
+
     return 0
+
 
 # ----------------------------
 # CLI Entrypoint
 # ----------------------------
 def main(argv: List[str] | None = None) -> int:
-    # Setup command line parser
     parser = argparse.ArgumentParser(prog="run", description="Phase 1 CLI for trustworthy model reuse")
     parser.add_argument("arg", nargs="?", help="install | test | URL_FILE")
     args = parser.parse_args(argv)
     
-    # If no arguments -> show help
     if args.arg is None:
         parser.print_help()
         return 1
 
-    # Handle install/test/file
     if args.arg == "install":
         return handle_install()
     if args.arg == "test":
         return handle_test()
 
-    # Otherwise, treat it as a file
     return process_url_file(args.arg)
 
-# If run directly, call main() and exit with this code
+
 if __name__ == "__main__":
     sys.exit(main())

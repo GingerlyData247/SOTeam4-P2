@@ -1,95 +1,180 @@
+# src/metrics/treescore.py
 from __future__ import annotations
-import time, json, logging, importlib, pkgutil, os, requests
-from typing import Any, Dict, List, Tuple, Set, Callable
-from huggingface_hub import hf_hub_download, HfApi
-from dotenv import load_dotenv
+import time, importlib
+from typing import Any, Dict, Tuple, Callable, List, Set
 
-load_dotenv()
-HF_TOKEN = os.getenv("HUGGINGFACE_HUB_TOKEN")
-logger = logging.getLogger("phase1_cli")
+from huggingface_hub import HfApi, ModelInfo
+from src.utils.hf_normalize import normalize_hf_id
+from src.utils.logging import logger
 
-HUGGINGFACE_API_BASE = "https://huggingface.co"
+api = HfApi()
 
+_INFO: Dict[str, ModelInfo] = {}
+_NET_CACHE: Dict[str, float] = {}
+_PARENT_CACHE: Dict[str, List[str]] = {}
+_METRICS: Dict[str, Callable] = {}
 
-def _download_config_json_via_hf(repo_id: str) -> Dict[str, Any] | None:
+OTHER = [
+    "bus_factor",
+    "category",
+    "code_quality",
+    "dataset_and_code_score",
+    "dataset_quality",
+    "license",
+    "performance_claims",
+    "ramp_up_time",
+    "reproducibility",
+    "reviewedness",
+    "size",
+]
+
+def _info(repo: str) -> ModelInfo | None:
+    repo = normalize_hf_id(repo)
+    if repo in _INFO:
+        return _INFO[repo]
     try:
-        api = HfApi(token=HF_TOKEN)
-        path = hf_hub_download(repo_id=repo_id, filename="config.json", token=HF_TOKEN)
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
+        m = api.model_info(repo)
+        _INFO[repo] = m
+        return m
+    except Exception as e:
+        logger.debug("treescore: info failed for %s: %s", repo, e)
+        return None
+
+def _load_metrics():
+    global _METRICS
+    if _METRICS:
+        return _METRICS
+    for name in OTHER:
         try:
-            files = api.list_repo_files(repo_id)
-            if "config.json" in files:
-                url = f"{HUGGINGFACE_API_BASE}/{repo_id}/resolve/main/config.json"
-                r = requests.get(url, timeout=6.0)
-                if r.status_code == 200:
-                    return r.json()
-        except Exception:
-            pass
+            mod = importlib.import_module(f"src.metrics.{name}")
+            fn = getattr(mod, "metric", None)
+            if callable(fn):
+                _METRICS[name] = fn
+        except Exception as e:
+            logger.debug("treescore: skip metric %s: %s", name, e)
+    return _METRICS
+
+def _scalar(name: str, val: Any) -> float | None:
+    if isinstance(val, (int, float)):
+        return float(max(0, min(1, val)))
+    if name == "size" and isinstance(val, dict):
+        nums = [v for v in val.values() if isinstance(v, (int, float))]
+        if nums:
+            avg = sum(nums)/len(nums)
+            return float(max(0, min(1, avg)))
     return None
 
+def _net(repo: str) -> float:
+    repo = normalize_hf_id(repo)
+    if repo in _NET_CACHE:
+        return _NET_CACHE[repo]
 
-def _parents_from_config(cfg: Dict[str, Any]) -> List[str]:
-    keys = ["parent_model", "parents", "model_parent", "parent", "parents_list"]
-    vals: List[str] = []
-    for k in keys:
-        v = cfg.get(k)
-        if isinstance(v, str):
-            vals.append(v)
-        elif isinstance(v, list):
-            vals.extend(map(str, v))
-    return list({v.strip() for v in vals if v.strip()})
-
-
-def _load_other_metrics() -> Dict[str, Callable[[Dict[str, Any]], Tuple[float, int]]]:
-    metrics: Dict[str, Callable] = {}
-    pkg = importlib.import_module("src.metrics")
-    for _, mod_name, is_pkg in pkgutil.iter_modules(pkg.__path__, pkg.__name__ + "."):
-        if is_pkg or mod_name.endswith(".treescore"):
-            continue
-        mod = importlib.import_module(mod_name)
-        func = getattr(mod, "metric", None)
-        if callable(func):
-            metrics[mod_name.split(".")[-1]] = func
-    return metrics
-
-
-def _compute_parent_net_score(parent: str, cache: Dict[str, float]) -> float:
-    if parent in cache:
-        return cache[parent]
-    metrics = _load_other_metrics()
-    res = {"name": parent, "url": f"https://huggingface.co/{parent}"}
-    total, n = 0.0, 0
-    for fn in metrics.values():
-        try:
-            s, _ = fn(res)
-            total += float(s)
-            n += 1
-        except Exception:
-            pass
-    cache[parent] = round(total / n, 4) if n else 0.0
-    return cache[parent]
-
-
-def _compute_treescore_for_model(repo_id: str, visited: Set[str], cache: Dict[str, float]) -> float:
-    if repo_id in visited:
+    m = _info(repo)
+    if m is None:
+        _NET_CACHE[repo] = 0.0
         return 0.0
-    visited.add(repo_id)
-    cfg = _download_config_json_via_hf(repo_id)
-    parents = _parents_from_config(cfg or {})
-    if not parents:
-        return _compute_parent_net_score(repo_id, cache)
-    scores = [_compute_parent_net_score(p, cache) for p in parents]
-    if not scores:
-        return _compute_parent_net_score(repo_id, cache)
-    avg = sum(scores) / len(scores)
-    return float(round(min(1.0, avg), 4))
 
+    metrics = _load_metrics()
+    resource = {
+        "name": repo,
+        "url": f"https://huggingface.co/{repo}",
+        "category": "MODEL",
+        "skip_repo_metrics": False,
+        "local_path": None,
+    }
+
+    scores = []
+    for name, fn in metrics.items():
+        try:
+            s, _lat = fn(resource)
+            sc = _scalar(name, s)
+            if sc is not None:
+                scores.append(sc)
+        except:
+            pass
+
+    net = float(sum(scores)/len(scores)) if scores else 0.0
+    _NET_CACHE[repo] = net
+    return net
+
+def _parents(repo: str) -> List[str]:
+    repo = normalize_hf_id(repo)
+    if repo in _PARENT_CACHE:
+        return _PARENT_CACHE[repo]
+
+    info = _info(repo)
+    if info is None:
+        _PARENT_CACHE[repo] = []
+        return []
+
+    pts = set()
+    card_obj = getattr(info, "cardData", None)
+    card = getattr(card_obj, "data", {}) if card_obj else {}
+    tags = [t for t in getattr(info, "tags", []) if isinstance(t, str)]
+
+    for key in ("base_model", "parent_model", "source_model", "teacher_model", "original_model"):
+        v = card.get(key)
+        if isinstance(v, str):
+            pts.add(normalize_hf_id(v))
+
+    for t in tags:
+        low = t.lower()
+        if low.startswith(("base_model:", "parent_model:")):
+            val = t.split(":", 1)[1].strip()
+            if val:
+                pts.add(normalize_hf_id(val))
+
+    for t in tags:
+        if "/" in t and not t.startswith(("task:", "pipeline:", "license:", "arxiv:")):
+            pts.add(normalize_hf_id(t))
+
+    plist = list(pts)
+    _PARENT_CACHE[repo] = plist
+    return plist
+
+def _walk(repo: str, seen: Set[str]) -> Tuple[float, int]:
+    repo = normalize_hf_id(repo)
+    if repo in seen:
+        return 0.0, 0
+    seen.add(repo)
+
+    parents = _parents(repo)
+    total = 0.0
+    count = 0
+
+    for p in parents:
+        pn = _net(p)
+        total += pn
+        count += 1
+
+        ssum, scnt = _walk(p, seen)
+        total += ssum
+        count += scnt
+
+    return total, count
 
 def metric(resource: Dict[str, Any]) -> Tuple[float, int]:
     start = time.perf_counter()
-    name = resource.get("name") or (resource.get("url") or "").split("/")[-1]
-    score = _compute_treescore_for_model(name, set(), {})
-    latency = int((time.perf_counter() - start) * 1000)
-    return float(max(0.0, min(1.0, score))), latency
+    name = resource.get("name") or ""
+    if "/" not in name:
+        return 0.0, int((time.perf_counter() - start)*1000)
+
+    repo = normalize_hf_id(name)
+
+    try:
+        own = _net(repo)
+        s, c = _walk(repo, seen=set())
+
+        if c == 0:
+            score = own
+        else:
+            avg = s/c
+            score = (own + avg) / 2.0
+
+        score = float(max(0, min(1, score)))
+    except Exception as e:
+        logger.debug("treescore: failed for %s: %s", repo, e)
+        score = 0.0
+
+    lat = int((time.perf_counter() - start)*1000)
+    return score, lat
