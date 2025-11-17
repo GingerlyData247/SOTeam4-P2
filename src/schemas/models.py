@@ -33,8 +33,7 @@ class Page(GenericModel, Generic[T]):
     next_cursor: Optional[str] = None
 
 
-# 🔥 REQUIRED FOR FASTAPI OPENAPI GENERATION
-# Because __future__ annotations + generics + nested references
+# Required in some Pydantic v2 setups when using __future__.annotations + generics.
 ModelCreate.model_rebuild()
 ModelUpdate.model_rebuild()
 ModelOut.model_rebuild()

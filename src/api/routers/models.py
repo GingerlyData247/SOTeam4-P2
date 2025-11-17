@@ -30,6 +30,7 @@ def list_models(
     limit: int = Query(20, ge=1, le=100),
     cursor: Optional[str] = None,
 ) -> Page[ModelOut]:
+    # Delegate to RegistryService.list, which now supports q, limit, cursor
     return _registry.list(q=q, limit=limit, cursor=cursor)
 
 
