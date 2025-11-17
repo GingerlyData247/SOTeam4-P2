@@ -176,7 +176,15 @@ def ingest_huggingface(model_ref: str = Query(..., description="owner/name or fu
 @router.delete("/reset", status_code=200)
 def reset_system():
     _registry.reset()
+
+    # ALSO reset the scoring service if it stores artifacts
+    try:
+        _scoring.reset()
+    except Exception:
+        pass
+
     return {"status": "registry reset"}
+
 
 
 
