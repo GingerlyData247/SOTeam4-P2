@@ -71,7 +71,7 @@ def rate_model(model_ref: str):
     from src.utils.hf_normalize import normalize_hf_id
     from src.utils.github_link_finder import find_github_url_from_hf
     #from src.utils.repo_cloner import clone_repo_to_temp
-    from run import compute_metrics_for_model, _normalize_github_repo_url
+    from src.run import compute_metrics_for_model, _normalize_github_repo_url
 
     load_dotenv()
     start = time.perf_counter()
@@ -128,7 +128,7 @@ def ingest_huggingface(model_ref: str = Query(..., description="owner/name or fu
     from src.utils.hf_normalize import normalize_hf_id
     from src.utils.github_link_finder import find_github_url_from_hf
     #from src.utils.repo_cloner import clone_repo_to_temp
-    from run import compute_metrics_for_model, _normalize_github_repo_url
+    from src.run import compute_metrics_for_model, _normalize_github_repo_url
     from ...schemas.models import ModelCreate
 
     hf_id = normalize_hf_id(model_ref)
