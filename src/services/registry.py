@@ -49,5 +49,8 @@ class RegistryService:
         return len(self._models)
 
     def reset(self):
-        self._models = []
+        self._models = {}          # clear models
+        self._index = {}           # clear index if used
+        self._order = []           # clear order if used
+        self._cursor_map = {}      # clear cursors if used
 
