@@ -185,3 +185,13 @@ def health():
         "uptime_s": int(time.time() - _START_TIME),
         "models": _registry.count_models(),
     }
+
+# ------------------------------------------------------------------ #
+# /tracks endpoint added directly in models router
+# ------------------------------------------------------------------ #
+@router.get("/tracks")
+def get_tracks():
+    planned_tracks = ["Performance track"] # casing is important
+    return {
+        "plannedTracks": planned_tracks
+    }
