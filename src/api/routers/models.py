@@ -10,17 +10,27 @@ from ...services.scoring import ScoringService
 _START_TIME = time.time()
 
 router = APIRouter()
-root_router = APIRouter()
 
 _registry = RegistryService()
 _ingest = IngestService(registry=_registry)
 _scoring = ScoringService()
 
+
 # ------------------------------------------------------------------ #
-# Autograder-Required Reset Route
+# Autograder-Required Reset Endpoints
 # ------------------------------------------------------------------ #
 @router.delete("/artifacts/reset", status_code=200)
 def reset_artifacts():
+    _registry.reset()
+    try:
+        _scoring.reset()
+    except Exception:
+        pass
+    return {"status": "registry reset"}
+
+
+@router.delete("/models/reset", status_code=200)
+def reset_models():
     _registry.reset()
     try:
         _scoring.reset()
@@ -74,9 +84,6 @@ def delete_model(model_id: str):
 # ------------------------------------------------------------------ #
 @router.get("/rate/{model_ref:path}")
 def rate_model(model_ref: str):
-    """
-    Phase 2: No GitHub cloning, but must compute metrics.
-    """
     import io, shutil, time as _time
     from contextlib import redirect_stdout, redirect_stderr
     from dotenv import load_dotenv
@@ -123,8 +130,6 @@ def ingest_huggingface(
     model_ref: str = Query(..., description="owner/name or full HF URL"),
 ) -> ModelOut:
 
-    import io, shutil
-    from contextlib import redirect_stdout, redirect_stderr
     from src.utils.hf_normalize import normalize_hf_id
     from src.run import compute_metrics_for_model
     from ...schemas.models import ModelCreate
@@ -161,15 +166,6 @@ def ingest_huggingface(
 
 
 # ------------------------------------------------------------------ #
-# Reset
-# ------------------------------------------------------------------ #
-
-
-
-
-
-
-# ------------------------------------------------------------------ #
 # Health
 # ------------------------------------------------------------------ #
 @router.get("/health")
@@ -186,11 +182,4 @@ def health():
 # ------------------------------------------------------------------ #
 @router.get("/tracks")
 def get_tracks():
-    return {
-        "plannedTracks": [
-            "Performance track"
-        ]
-    }
-
-
-
+    return {"plannedTracks": ["Performance track"]}
