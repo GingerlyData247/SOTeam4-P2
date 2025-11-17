@@ -32,11 +32,7 @@ app.include_router(models_router.router, prefix="/api")
 app.include_router(s3_router)  # routes_s3 defines prefix="/api/s3"
 
 # Health and env endpoints
-@app.get("/api/health")
-def health():
-    # Simple health status; router has its own detailed /api/health but this is
-    # the one exposed last in the app and matches the autograder expectations.
-    return {"status": "ok"}
+
 
 
 @app.get("/api/env")
