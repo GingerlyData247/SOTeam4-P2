@@ -1,5 +1,5 @@
-from fastapi import APIRouter, HTTPException, Query, Header
-from typing import Optional, Dict, Any
+from fastapi import APIRouter, HTTPException, Query
+from typing import Optional
 import time
 
 from ...schemas.models import ModelCreate, ModelUpdate, ModelOut, Page
@@ -17,7 +17,7 @@ _scoring = ScoringService()
 
 
 # ------------------------------------------------------------------ #
-# CRUD endpoints
+# CRUD Endpoints
 # ------------------------------------------------------------------ #
 @router.post("/models", response_model=ModelOut, status_code=201)
 def create_model(body: ModelCreate) -> ModelOut:
@@ -58,34 +58,25 @@ def delete_model(model_id: str):
 
 
 # ------------------------------------------------------------------ #
-# Rating & Ingest
+# Rating
 # ------------------------------------------------------------------ #
 @router.get("/rate/{model_ref:path}")
 def rate_model(model_ref: str):
     """
-    model_ref can be 'owner/name' or a local id; we accept both for Dev UX.
-    Returns: {"net": float, "subs": {...}, "latency_ms": int}
+    Phase 2: No GitHub cloning, but must compute metrics.
     """
-    import io, os, time as _time, shutil
+    import io, shutil, time as _time
     from contextlib import redirect_stdout, redirect_stderr
     from dotenv import load_dotenv
     from src.utils.hf_normalize import normalize_hf_id
-    from src.utils.github_link_finder import find_github_url_from_hf  # noqa: F401
-    # from src.utils.repo_cloner import clone_repo_to_temp  # Phase 2: no git
-    from src.run import compute_metrics_for_model, _normalize_github_repo_url  # noqa: F401
+    from src.run import compute_metrics_for_model
 
     load_dotenv()
     start = _time.perf_counter()
 
-    # 1) Normalize model name and build HF URL
     hf_id = normalize_hf_id(model_ref)
     hf_url = f"https://huggingface.co/{hf_id}"
 
-    # Phase 2: No GitHub cloning; metrics must run without repos
-    repo_url = None  # noqa: F841
-    local_path = None
-
-    # 2) Build resource (same as CLI)
     resource = {
         "name": hf_id,
         "url": hf_url,
@@ -95,19 +86,14 @@ def rate_model(model_ref: str):
         "category": "MODEL",
     }
 
-    # 3) Run metric computation
     result = compute_metrics_for_model(resource)
 
-    # 4) Clean up (no-op, but kept for safety if local_path ever used)
-    if local_path:
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            shutil.rmtree(local_path, ignore_errors=True)
-
     latency_ms = int((_time.perf_counter() - start) * 1000)
+
     subs = {
         k: v
         for k, v in result.items()
-        if isinstance(v, (float, dict)) and not k.endswith("_latency")
+        if not k.endswith("_latency") and isinstance(v, (float, dict))
     }
 
     return {
@@ -117,28 +103,22 @@ def rate_model(model_ref: str):
     }
 
 
+# ------------------------------------------------------------------ #
+# Ingest
+# ------------------------------------------------------------------ #
 @router.post("/ingest", response_model=ModelOut, status_code=201)
 def ingest_huggingface(
     model_ref: str = Query(..., description="owner/name or full HF URL"),
 ) -> ModelOut:
-    """
-    Ingest a Hugging Face model, ensuring metrics (like reviewedness) are computed
-    with the same logic as /rate.
-    """
+
     import io, shutil
     from contextlib import redirect_stdout, redirect_stderr
     from src.utils.hf_normalize import normalize_hf_id
-    from src.utils.github_link_finder import find_github_url_from_hf  # noqa: F401
-    # from src.utils.repo_cloner import clone_repo_to_temp  # Phase 2: no git
-    from src.run import compute_metrics_for_model, _normalize_github_repo_url  # noqa: F401
+    from src.run import compute_metrics_for_model
     from ...schemas.models import ModelCreate
 
     hf_id = normalize_hf_id(model_ref)
     hf_url = f"https://huggingface.co/{hf_id}"
-
-    # Phase 2: No GitHub cloning; metrics must run without repos
-    repo_url = None  # noqa: F841
-    local_path = None
 
     resource = {
         "name": hf_id,
@@ -151,19 +131,13 @@ def ingest_huggingface(
 
     result = compute_metrics_for_model(resource)
 
-    # Cleanup (no-op unless local_path is used in the future)
-    if local_path:
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            shutil.rmtree(local_path, ignore_errors=True)
-
     reviewedness = result.get("reviewedness", 0.0)
     if reviewedness < 0.5:
         raise HTTPException(
             status_code=400,
-            detail=f"Ingest rejected: reviewedness={reviewedness:.2f} < 0.50",
+            detail=f"Ingest rejected: reviewedness={reviewedness:.2f} < 0.50"
         )
 
-    # Create proper Pydantic model for registry
     model_create = ModelCreate(
         name=hf_id,
         url=hf_url,
@@ -171,34 +145,30 @@ def ingest_huggingface(
         metadata=result,
     )
 
-    model_entry = _registry.create(model_create)
-    return model_entry
+    return _registry.create(model_create)
 
 
 # ------------------------------------------------------------------ #
-# Reset & Health
+# Reset
 # ------------------------------------------------------------------ #
 @router.delete("/reset", status_code=200)
 def reset_system():
     """
-    Reset the in-memory registry and scoring-related state.
-
-    NOTE: For now this endpoint requires NO auth header, matching your
-    current autograder expectations. If/when you wire access control,
-    this is the place to reintroduce X-Authorization checks.
+    No auth for now — matches your current testing needs.
     """
     _registry.reset()
 
-    # ALSO reset the scoring service if it stores any artifacts
     try:
         _scoring.reset()
     except Exception:
-        # Be defensive; we don't want reset to 500 if scoring has no reset method
         pass
 
     return {"status": "registry reset"}
 
 
+# ------------------------------------------------------------------ #
+# Health
+# ------------------------------------------------------------------ #
 @router.get("/health")
 def health():
     return {
@@ -209,11 +179,12 @@ def health():
 
 
 # ------------------------------------------------------------------ #
-# /tracks endpoint (unchanged as requested)
+# Tracks
 # ------------------------------------------------------------------ #
 @router.get("/tracks")
 def get_tracks():
-    planned_tracks = ["Performance track"]  # casing is important
     return {
-        "plannedTracks": planned_tracks
+        "plannedTracks": [
+            "Performance track"
+        ]
     }

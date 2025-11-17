@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from .routers.models import router as models_router
 
+
 app = FastAPI(
     title="Trustworthy Model Registry",
     version="0.1.0",
@@ -13,3 +14,4 @@ def root():
 
 
 app.include_router(models_router, prefix="", tags=["models"])
+
