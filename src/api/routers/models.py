@@ -16,19 +16,18 @@ _registry = RegistryService()
 _ingest = IngestService(registry=_registry)
 _scoring = ScoringService()
 
-@router.delete("/models/reset", status_code=200)
-def reset_models():
-    """
-    Autograder-required reset endpoint.
-    Resets registry + scoring data.
-    """
+# ------------------------------------------------------------------ #
+# Autograder-Required Reset Route
+# ------------------------------------------------------------------ #
+@router.delete("/artifacts/reset", status_code=200)
+def reset_artifacts():
     _registry.reset()
     try:
         _scoring.reset()
     except Exception:
         pass
-
     return {"status": "registry reset"}
+
 
 # ------------------------------------------------------------------ #
 # CRUD Endpoints
@@ -164,14 +163,7 @@ def ingest_huggingface(
 # ------------------------------------------------------------------ #
 # Reset
 # ------------------------------------------------------------------ #
-@router.delete("/reset", status_code=200)
-def reset_system():
-    _registry.reset()
-    try:
-        _scoring.reset()
-    except Exception:
-        pass
-    return {"status": "registry reset"}
+
 
 
 
@@ -201,11 +193,4 @@ def get_tracks():
     }
 
 
-@root_router.delete("/reset", status_code=200)
-def reset_system_root():
-    _registry.reset()
-    try:
-        _scoring.reset()
-    except Exception:
-        pass
-    return {"status": "registry reset"}
+
