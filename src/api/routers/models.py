@@ -16,6 +16,19 @@ _registry = RegistryService()
 _ingest = IngestService(registry=_registry)
 _scoring = ScoringService()
 
+@router.delete("/models/reset", status_code=200)
+def reset_models():
+    """
+    Autograder-required reset endpoint.
+    Resets registry + scoring data.
+    """
+    _registry.reset()
+    try:
+        _scoring.reset()
+    except Exception:
+        pass
+
+    return {"status": "registry reset"}
 
 # ------------------------------------------------------------------ #
 # CRUD Endpoints
@@ -153,17 +166,15 @@ def ingest_huggingface(
 # ------------------------------------------------------------------ #
 @router.delete("/reset", status_code=200)
 def reset_system():
-    """
-    No auth for now — matches your current testing needs.
-    """
     _registry.reset()
-
     try:
         _scoring.reset()
     except Exception:
         pass
-
     return {"status": "registry reset"}
+
+
+
 
 
 # ------------------------------------------------------------------ #
