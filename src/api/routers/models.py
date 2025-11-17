@@ -10,6 +10,7 @@ from ...services.scoring import ScoringService
 _START_TIME = time.time()
 
 router = APIRouter()
+root_router = APIRouter()
 
 _registry = RegistryService()
 _ingest = IngestService(registry=_registry)
@@ -30,7 +31,6 @@ def list_models(
     limit: int = Query(20, ge=1, le=100),
     cursor: Optional[str] = None,
 ) -> Page[ModelOut]:
-    # Delegate to RegistryService.list, which now supports q, limit, cursor
     return _registry.list(q=q, limit=limit, cursor=cursor)
 
 
@@ -188,3 +188,13 @@ def get_tracks():
             "Performance track"
         ]
     }
+
+
+@root_router.delete("/reset", status_code=200)
+def reset_system_root():
+    _registry.reset()
+    try:
+        _scoring.reset()
+    except Exception:
+        pass
+    return {"status": "registry reset"}
