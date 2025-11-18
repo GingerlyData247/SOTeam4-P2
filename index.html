@@ -244,130 +244,77 @@ document
 document.getElementById("search-btn").onclick = async function () {
   const inputEl = document.getElementById("search-input");
   const display = document.getElementById("model-list-display");
-  const queryRaw = (inputEl.value || "").trim();
+  const id = (inputEl.value || "").trim();
 
-  // Clear older messages
   display.style.whiteSpace = "pre-wrap";
-  display.textContent = "";
+  display.innerHTML = "";
 
-  if (!queryRaw) {
-    display.textContent = "⚠️ Please enter an exact model ID (example: google-bert/bert-base-uncased).";
+  if (!id) {
+    display.textContent = "⚠️ Please enter a model ID.";
     return;
   }
 
-  display.textContent = "Searching for exact model ID...";
+  display.textContent = "Searching...";
 
   try {
-    // Fetch a page of models from backend. We use limit=100 (backend max) and search client-side.
-    // This avoids relying on backend regex behavior and guarantees EXACT matching.
-    const resp = await fetch(`${API_BASE}/models?limit=100`);
-    if (!resp.ok) {
-      display.textContent = `Error: failed to query registry (status ${resp.status})`;
+    const res = await fetch(`${API_BASE}/models/${encodeURIComponent(id)}`);
+
+    if (res.status === 404) {
+      display.textContent = `❌ Model not found: "${id}"`;
       return;
     }
 
-    const page = await resp.json();
-    const items = page.items || [];
-
-    // First attempt: exact, case-sensitive match
-    const exact = items.find(m => m.name === queryRaw);
-
-    if (exact) {
-      // Show a detailed card for the exact model
-      display.innerHTML = renderModelCard(exact);
-      // Scroll into view to ensure user sees it
-      display.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (!res.ok) {
+      display.textContent = `Error: Server returned status ${res.status}`;
       return;
     }
 
-    // If not found, try case-insensitive exact match
-    const exactCI = items.find(m => m.name.toLowerCase() === queryRaw.toLowerCase());
-    if (exactCI) {
-      display.innerHTML = "Note: matched by case-insensitive ID match.\n\n" + renderModelCard(exactCI);
-      display.scrollIntoView({ behavior: "smooth", block: "start" });
-      return;
-    }
-
-    // No exact match — produce helpful feedback + suggestions
-    // Suggestions: substring matches (name includes query), up to 10 suggestions
-    const lowered = queryRaw.toLowerCase();
-    const suggestions = items
-      .filter(m => m.name.toLowerCase().includes(lowered))
-      .slice(0, 10);
-
-    let out = `No model found with exact ID: "${queryRaw}".\n\n`;
-    out += "Tips:\n";
-    out += "- Make sure you used the full repository/model id (owner/model-name).\n";
-    out += "- Example: facebook/wav2vec2-base or google-bert/bert-base-uncased\n\n";
-
-    if (suggestions.length > 0) {
-      out += "Did you mean one of these? (click to view)\n\n";
-      // Render clickable list of suggestions
-      display.innerHTML = out + suggestions.map((s, i) =>
-        `<div style="margin:6px 0;"><a href="#" data-model="${escapeHtml(s.name)}" class="suggest-link">${i+1}. ${escapeHtml(s.name)}</a></div>`
-      ).join("");
-
-      // Attach click handlers to suggestions that render full card when clicked
-      Array.from(display.querySelectorAll(".suggest-link")).forEach(a => {
-        a.addEventListener("click", (e) => {
-          e.preventDefault();
-          const modelName = a.getAttribute("data-model");
-          const model = suggestions.find(x => x.name === modelName);
-          if (model) {
-            display.innerHTML = renderModelCard(model);
-            display.scrollIntoView({ behavior: "smooth", block: "start" });
-          }
-        });
-      });
-
-    } else {
-      out += "No close matches found in the first 100 models.";
-      display.textContent = out;
-    }
+    const model = await res.json();
+    display.innerHTML = renderModelCard(model);
+    display.scrollIntoView({ behavior: "smooth", block: "start" });
 
   } catch (err) {
     console.error(err);
-    display.textContent = "Unexpected error: " + (err.message || err);
+    display.textContent = "Unexpected error: " + err.message;
   }
 };
 
-// Helper to render a model's summary card (HTML string)
 function renderModelCard(model) {
-  // model could have properties like: name, url, version, card_summary, metadata
   const name = escapeHtml(model.name || "(no name)");
   const summary = escapeHtml(model.card_summary || "");
-  const url = model.url ? `<a href="${escapeHtml(model.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(model.url)}</a>` : "(no url)";
+  const url = model.url
+    ? `<a href="${escapeHtml(model.url)}" target="_blank">${escapeHtml(model.url)}</a>`
+    : "(no url)";
   const version = escapeHtml(model.version || "");
-  // Pretty JSON of metadata if available
-  let metaStr = "";
-  try {
-    metaStr = JSON.stringify(model.metadata || model, null, 2);
-  } catch {
-    metaStr = String(model.metadata || "");
-  }
 
-  // Truncate long metadata for initial view, but allow full expand
-  const metaPreview = escapeHtml(metaStr.length > 1000 ? metaStr.slice(0, 1000) + "\n\n... (truncated) ..." : metaStr);
+  let metadataStr = "";
+  try {
+    metadataStr = JSON.stringify(model.metadata || model, null, 2);
+  } catch {
+    metadataStr = String(model.metadata || "");
+  }
 
   return `
     <div class="model-card" style="white-space:pre-wrap;">
       <strong style="font-size:1.05rem">${name}</strong><br/>
       <small>Version: ${version} • URL: ${url}</small>
+
       <div style="margin-top:0.6rem;">
         <em>${summary}</em>
       </div>
+
       <details style="margin-top:0.6rem;">
         <summary>Show raw metadata</summary>
-        <pre style="background:#f3f4f6; padding:8px; border-radius:6px; overflow:auto; max-height:360px;">${metaPreview}</pre>
+        <pre style="background:#f3f4f6; padding:8px; border-radius:6px; overflow:auto; max-height:360px;">
+${escapeHtml(metadataStr)}
+        </pre>
       </details>
     </div>
   `;
 }
 
-// small helper to escape HTML
 function escapeHtml(s) {
-  if (s == null) return "";
-  return String(s)
+  return String(s || "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -451,6 +398,7 @@ document.getElementById("list-models-btn").addEventListener("click", async () =>
 
   </body>
 </html>
+
 
 
 
