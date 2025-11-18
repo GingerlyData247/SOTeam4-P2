@@ -226,27 +226,14 @@
           : "none";
       }
 
-      const data = await resp.json();
-const container = document.getElementById("models-container");
-
-if (!append) container.innerHTML = "";
-
-if ((data.items || []).length === 0) {
-    container.innerHTML = "<p>No matching models found.</p>";
-    return;
-}
-
-
-function escapeRegex(text) {
-    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-document.getElementById("search-btn").addEventListener("click", () => {
-    cursor = null;
-    const raw = document.getElementById("search-input").value;
-    currentQuery = escapeRegex(raw);
-    fetchModels(currentQuery, false);
-});
+      document
+        .getElementById("search-btn")
+        .addEventListener("click", () => {
+          cursor = null;
+          currentQuery =
+            document.getElementById("search-input").value;
+          fetchModels(currentQuery, false);
+        });
 
 
       document
@@ -324,6 +311,7 @@ document.getElementById("list-models-btn").addEventListener("click", async () =>
 
   </body>
 </html>
+
 
 
 
