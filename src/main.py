@@ -8,10 +8,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 
-from src.api.routers import models as models_router
-from src.api.routes_s3 import router as s3_router  # mounts /api/s3/*
-#from src.api.routers.models import root_router
-
+# IMPORTANT: import ONLY the router, not the module
+from src.api.routers.models import router as models_router
+from src.api.routes_s3 import router as s3_router
 
 
 app = FastAPI(title="SOTeam4P2 API")
@@ -30,15 +29,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount routers under /api
-app.include_router(models_router.router)
-#app.include_router(root_router)  # mounts /reset at /
-app.include_router(s3_router)  # routes_s3 defines prefix="/api/s3"
+# -------------------------------------------------------------
+# Mount Routers
+# -------------------------------------------------------------
 
-# Health and env endpoints
+# Mount ALL model-related endpoints under /api
+# This gives:
+#   /api/models/reset
+#   /api/artifacts/reset
+#   /api/models
+#   /api/rate/{model}
+#   /api/ingest
+#   /api/health
+#   /api/tracks
+app.include_router(models_router, prefix="/api")
 
+# Mount S3 routes (these already include their own /api/s3 prefix)
+app.include_router(s3_router)
 
-
+# -------------------------------------------------------------
+# Environment debugging endpoint
+# -------------------------------------------------------------
 @app.get("/api/env")
 def get_env_values():
     return {
@@ -46,8 +57,7 @@ def get_env_values():
         "AWS_REGION": os.getenv("AWS_REGION"),
     }
 
-
-# Single Lambda entrypoint
+# Lambda handler
 handler = Mangum(app)
 
 
