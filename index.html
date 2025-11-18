@@ -277,8 +277,8 @@ document.getElementById("list-models-btn").addEventListener("click", async () =>
     display.textContent = "Loading...";
 
     try {
-        // Correct backend call using your API_BASE constant
-        const response = await fetch(`${API_BASE}/models?limit=200`);
+        // limit must be <= 100
+        const response = await fetch(`${API_BASE}/models?limit=100`);
 
         if (!response.ok) {
             throw new Error(`Request failed (${response.status})`);
@@ -292,7 +292,7 @@ document.getElementById("list-models-btn").addEventListener("click", async () =>
             return;
         }
 
-        // Pretty print the list
+        // Pretty print
         let output = "📦 Registered Models:\n\n";
         models.forEach((m, i) => {
             output += `${i + 1}. ${m.name}\n`;
@@ -307,8 +307,10 @@ document.getElementById("list-models-btn").addEventListener("click", async () =>
 </script>
 
 
+
   </body>
 </html>
+
 
 
 
