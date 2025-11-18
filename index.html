@@ -271,34 +271,44 @@ document.getElementById("reset-btn").addEventListener("click", async () => {
       fetchModels();
     </script>
 
-    <script>
+<script>
 document.getElementById("list-models-btn").addEventListener("click", async () => {
+    const display = document.getElementById("model-list-display");
+    display.textContent = "Loading...";
+
     try {
-        const response = await fetch("/models");   // adjust if your backend URL differs
-        
+        // Correct backend call using your API_BASE constant
+        const response = await fetch(`${API_BASE}/models?limit=200`);
+
         if (!response.ok) {
-            throw new Error("Failed to fetch model list");
+            throw new Error(`Request failed (${response.status})`);
         }
 
-        const models = await response.json();
+        const page = await response.json();
+        const models = page.items || [];
 
-        // Pretty print list
-        let output = "";
+        if (models.length === 0) {
+            display.textContent = "No models found.";
+            return;
+        }
+
+        // Pretty print the list
+        let output = "📦 Registered Models:\n\n";
         models.forEach((m, i) => {
-            output += `${i+1}. ${m.name}\n`;
+            output += `${i + 1}. ${m.name}\n`;
         });
 
-        if (output === "") output = "No models found.";
-
-        document.getElementById("model-list-display").innerText = output;
+        display.textContent = output;
 
     } catch (err) {
-        document.getElementById("model-list-display").innerText = err.message;
+        display.textContent = "Error: " + err.message;
     }
 });
 </script>
 
+
   </body>
 </html>
+
 
 
