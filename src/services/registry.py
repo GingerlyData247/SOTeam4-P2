@@ -82,7 +82,7 @@ class RegistryService:
 
         return {
             "items": items,
-            "next_cursor": next_cursor,
+            "next": next_cursor,
         }
 
     # ------------------------------------------------------------------ #
