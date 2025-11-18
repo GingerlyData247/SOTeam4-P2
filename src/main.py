@@ -59,7 +59,3 @@ def get_env_values():
 
 # Lambda handler
 handler = Mangum(app)
-
-
-# Single Lambda entrypoint
-handler = Mangum(app)
