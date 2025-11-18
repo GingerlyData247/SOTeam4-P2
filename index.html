@@ -126,7 +126,8 @@
       />
       <button id="search-btn">Search</button>
       <button id="load-more-btn" style="display: none">Load More</button>
-
+      <button id="reset-btn" style="background:#dc2626;">Reset Registry</button>
+      
       <div id="models-container"></div>
     </main>
 
@@ -233,8 +234,35 @@
           fetchModels(currentQuery, true);
         });
 
+      // --- Reset registry ---
+document.getElementById("reset-btn").addEventListener("click", async () => {
+  if (!confirm("Are you sure you want to reset the registry?")) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/reset`, {
+      method: "DELETE",
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      alert(`Reset failed: ${text}`);
+      return;
+    }
+
+    alert("Registry successfully reset!");
+
+    // clear UI + reload
+    document.getElementById("models-container").innerHTML = "";
+    cursor = null;
+    fetchModels();
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+});
+
       // initial load
       fetchModels();
     </script>
   </body>
 </html>
+
