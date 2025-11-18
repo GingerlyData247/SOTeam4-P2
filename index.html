@@ -226,14 +226,17 @@
           : "none";
       }
 
-      document
-        .getElementById("search-btn")
-        .addEventListener("click", () => {
-          cursor = null;
-          currentQuery =
-            document.getElementById("search-input").value;
-          fetchModels(currentQuery, false);
-        });
+function escapeRegex(text) {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+document.getElementById("search-btn").addEventListener("click", () => {
+    cursor = null;
+    const raw = document.getElementById("search-input").value;
+    currentQuery = escapeRegex(raw);
+    fetchModels(currentQuery, false);
+});
+
 
       document
         .getElementById("load-more-btn")
@@ -310,6 +313,7 @@ document.getElementById("list-models-btn").addEventListener("click", async () =>
 
   </body>
 </html>
+
 
 
 
