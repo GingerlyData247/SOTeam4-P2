@@ -125,6 +125,13 @@
         placeholder="Search models (regex)"
       />
       <button id="search-btn">Search</button>
+      <button id="list-models-btn">List All Models</button>
+
+<!-- Display area just for model list -->
+<div id="model-list-display" 
+     style="white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; margin-top: 10px;">
+</div>
+
       <button id="load-more-btn" style="display: none">Load More</button>
       <button id="reset-btn" style="background:#dc2626;">Reset Registry</button>
       
@@ -263,6 +270,35 @@ document.getElementById("reset-btn").addEventListener("click", async () => {
       // initial load
       fetchModels();
     </script>
+
+    <script>
+document.getElementById("list-models-btn").addEventListener("click", async () => {
+    try {
+        const response = await fetch("/models");   // adjust if your backend URL differs
+        
+        if (!response.ok) {
+            throw new Error("Failed to fetch model list");
+        }
+
+        const models = await response.json();
+
+        // Pretty print list
+        let output = "";
+        models.forEach((m, i) => {
+            output += `${i+1}. ${m.name}\n`;
+        });
+
+        if (output === "") output = "No models found.";
+
+        document.getElementById("model-list-display").innerText = output;
+
+    } catch (err) {
+        document.getElementById("model-list-display").innerText = err.message;
+    }
+});
+</script>
+
   </body>
 </html>
+
 
