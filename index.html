@@ -226,6 +226,17 @@
           : "none";
       }
 
+      const data = await resp.json();
+const container = document.getElementById("models-container");
+
+if (!append) container.innerHTML = "";
+
+if ((data.items || []).length === 0) {
+    container.innerHTML = "<p>No matching models found.</p>";
+    return;
+}
+
+
 function escapeRegex(text) {
     return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -313,6 +324,7 @@ document.getElementById("list-models-btn").addEventListener("click", async () =>
 
   </body>
 </html>
+
 
 
 
