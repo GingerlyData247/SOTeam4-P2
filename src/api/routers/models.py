@@ -122,7 +122,7 @@ def ingest_huggingface(model_ref: str = Query(...)):
 @router.delete("/reset", status_code=200)
 def reset_system():
     _registry.reset()
-    _storage.reset()     # ⭐ REQUIRED
+    #_storage.reset()     # ⭐ REQUIRED
     try:
         _scoring.reset()
     except:
