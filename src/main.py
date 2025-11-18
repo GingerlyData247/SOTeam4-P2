@@ -31,7 +31,7 @@ app.add_middleware(
 )
 
 # Mount routers under /api
-app.include_router(models_router.router, prefix="/api")
+app.include_router(models_router.router)
 #app.include_router(root_router)  # mounts /reset at /
 app.include_router(s3_router)  # routes_s3 defines prefix="/api/s3"
 
