@@ -152,6 +152,74 @@ def _walk(repo: str, seen: Set[str]) -> Tuple[float, int]:
         count += scnt
 
     return total, count
+    
+def extract_parents_from_resource(resource: Dict[str, Any]) -> List[str]:
+    """
+    Derive a list of *candidate parent models* for a given model resource.
+
+    This is used by the API's lineage graph endpoint.
+
+    Differences from `_parents(repo)` above:
+    - `_parents(repo)` talks to the Hugging Face API (HfApi) using a model id
+      string like "facebook/wav2vec2-base".
+    - `extract_parents_from_resource(resource)` is "offline": it only inspects
+      fields already present in the `resource` dict (config.json, tags, etc.),
+      which keeps lineage reproducible and avoids extra network calls.
+
+    The Phase 2 spec says lineage must be derived from structured metadata
+    (config.json), so we prioritize that here.
+    """
+    parents: Set[str] = set()
+
+    # Normalized name of *this* model, so we can avoid listing itself as a parent
+    name = resource.get("name") or ""
+    if isinstance(name, str) and "/" in name:
+        name = normalize_hf_id(name)
+
+    # -------------------------------------------------------------------------
+    # 1) PRIMARY SOURCE: config.json (structured metadata)
+    #    We expect prepare_resource / ingest to have loaded config.json into
+    #    resource["config"] as a dict. Different HF models use different keys
+    #    for their "base model", so we check several common ones.
+    # -------------------------------------------------------------------------
+    cfg = resource.get("config") or {}
+    if isinstance(cfg, dict):
+        candidate_keys = (
+            "base_model",
+            "teacher_model",
+            "parent_model",
+            "source_model",
+            "original_model",
+            "pretrained_model_name_or_path",
+        )
+        for key in candidate_keys:
+            val = cfg.get(key)
+            if isinstance(val, str) and "/" in val:
+                parents.add(normalize_hf_id(val))
+
+    # -------------------------------------------------------------------------
+    # 2) SECONDARY SOURCE: HF metadata tags (if present in the resource)
+    #    If prepare_resource stored Hugging Face metadata under
+    #    resource["hf_metadata"]["tags"], we can re-use those. We filter out
+    #    non-model tags like "task:", "pipeline:", "license:", etc.
+    # -------------------------------------------------------------------------
+    hf_meta = resource.get("hf_metadata") or {}
+    if isinstance(hf_meta, dict):
+        tags = hf_meta.get("tags") or []
+        for t in tags:
+            if not isinstance(t, str):
+                continue
+            if "/" not in t:
+                continue
+            if t.startswith(("task:", "pipeline:", "license:", "arxiv:")):
+                continue
+            parents.add(normalize_hf_id(t))
+
+    # Do not list the model itself as its own parent, even if metadata is messy
+    parents.discard(name)
+
+    # Sorted list is nicer for determinism and testing
+    return sorted(parents)
 
 def metric(resource: Dict[str, Any]) -> Tuple[float, int]:
     start = time.perf_counter()

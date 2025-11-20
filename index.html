@@ -132,10 +132,14 @@
      style="white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; margin-top: 10px;">
 </div>
 
-      <button id="load-more-btn" style="display: none">Load More</button>
-      <button id="reset-btn" style="background:#dc2626;">Reset Registry</button>
+	<button id="load-more-btn" style="display: none">Load More</button>
+	<button id="reset-btn" style="background:#dc2626;">Reset Registry</button>
       
-      <div id="models-container"></div>
+	<div id="models-container"></div>
+	  
+	<h2>Lineage</h2>
+	<div id="lineage-view">(Select a model to view its lineage.)</div>
+
     </main>
 
     <footer>© 2025 Team 4 • Purdue ECE/SWE 45000 • Phase 2</footer>
@@ -206,18 +210,19 @@
 
         if (!append) container.innerHTML = "";
 
-        (data.items || []).forEach((model) => {
-          const div = document.createElement("div");
-          div.className = "model-card";
-          div.innerHTML =
-            "<strong>" +
-            model.name +
-            "</strong><br>" +
-            "<small>" +
-            (model.card_summary || "(no summary)") +
-            "</small>";
+		(data.items || []).forEach((model) => {
+			const div = document.createElement("div");
+			div.className = "model-card";
+			div.innerHTML = `
+			  <strong>${model.name}</strong><br>
+			  <small>${model.card_summary || "(no summary)"}</small><br>
+			  <button class="lineage-btn" data-id="${model.id}">View Lineage</button>
+			`;
           container.appendChild(div);
         });
+
+        // NEW: hook up the buttons for lineage
+        attachLineageHandlers();
 
         // handle pagination
         cursor = data.next_cursor || null;
@@ -311,6 +316,143 @@ ${escapeHtml(metadataStr)}
       </details>
     </div>
   `;
+}
+
+/********************************************************************
+ * LINEAGE GRAPH SUPPORT
+ * ---------------------------------------------------------------
+ * These functions allow the frontend to:
+ *   1. Detect clicks on "View Lineage" buttons
+ *   2. Call the backend endpoint /models/{id}/lineage
+ *   3. Render a simple indented tree of parent → child relationships
+ ********************************************************************/
+
+
+/**
+ * attachLineageHandlers()
+ * ---------------------------------------------------------------
+ * After model cards are rendered, this function finds all buttons
+ * with class "lineage-btn" and attaches a click handler to each.
+ * 
+ * This must run ***after*** the model list is drawn, otherwise
+ * the buttons won't exist in the DOM.
+ */
+function attachLineageHandlers() {
+  // Select every lineage button currently on the page
+  document.querySelectorAll(".lineage-btn").forEach((btn) => {
+    btn.onclick = () => {
+      // Extract the model id stored in the button's HTML tag
+      const id = btn.dataset.id;
+
+      // Call the backend and show the lineage graph
+      loadLineage(id);
+    };
+  });
+}
+
+
+/**
+ * loadLineage(modelId)
+ * ---------------------------------------------------------------
+ * Fetches the lineage graph from the backend for the given model
+ * ID and renders it in the #lineage-view section.
+ */
+async function loadLineage(modelId) {
+  const box = document.getElementById("lineage-view");
+
+  // Show a loading indicator immediately
+  box.textContent = "Loading lineage...";
+
+  try {
+    // Call the backend API route created
+    const res = await fetch(`${API_BASE}/models/${modelId}/lineage`);
+
+    if (!res.ok) {
+      box.textContent = `Error loading lineage (${res.status})`;
+      return;
+    }
+
+    // Parse the lineage graph JSON
+    const graph = await res.json();
+
+    // Convert graph JSON → HTML indentation tree
+    box.innerHTML = renderLineageTree(graph);
+
+  } catch (err) {
+    // If network error, etc.
+    box.textContent = "Error: " + err.message;
+  }
+}
+
+
+/**
+ * renderLineageTree(graph)
+ * ---------------------------------------------------------------
+ * Turns a lineage graph into simple HTML.
+ *
+ * Example input:
+ * {
+ *   root_id: "...",
+ *   nodes: [{ id, name }, ...],
+ *   edges: [{ parent, child }, ...]
+ * }
+ *
+ * Output is indented HTML like:
+ *
+ *    • facebook/wav2vec2-base
+ *        • facebook/wav2vec2-large
+ */
+function renderLineageTree(graph) {
+
+  /***************************************************************
+   * 1. Convert list of nodes into a lookup table:
+   *      nodesById["abc123"] = { id: "...", name: "..." }
+   ***************************************************************/
+  const nodesById = {};
+  (graph.nodes || []).forEach((n) => {
+    nodesById[n.id] = n;
+  });
+
+
+  /***************************************************************
+   * 2. Group children by parent ID
+   *    Example:
+   *      children["A"] = ["B", "C"]
+   ***************************************************************/
+  const children = {};
+  (graph.edges || []).forEach((e) => {
+    (children[e.parent] = children[e.parent] || []).push(e.child);
+  });
+
+
+  /***************************************************************
+   * 3. Recursive function to draw each node and its descendants.
+   *    "depth" controls indentation.
+   ***************************************************************/
+  function renderNode(id, depth = 0, seen = new Set()) {
+
+    // Prevent infinite loops (just in case)
+    if (!nodesById[id] || seen.has(id)) return "";
+    seen.add(id);
+
+    // Render this model at the correct indentation
+    let html = `<div style="margin-left:${depth * 16}px">• ${
+      nodesById[id].name
+    }</div>`;
+
+    // Render all children of this node
+    (children[id] || []).forEach((childId) => {
+      html += renderNode(childId, depth + 1, seen);
+    });
+
+    return html;
+  }
+
+
+  /***************************************************************
+   * 4. Render the entire tree starting at the root model
+   ***************************************************************/
+  return renderNode(graph.root_id);
 }
 
 function escapeHtml(s) {
