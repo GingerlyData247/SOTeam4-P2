@@ -143,3 +143,18 @@ def health():
 @router.get("/tracks")
 def get_tracks():
     return {"plannedTracks": ["Performance track"]}
+
+
+@router.get("/models/{model_id}/lineage")
+def get_lineage(model_id: str):
+    """
+    Return the lineage graph for a given model id.
+
+    The graph is derived only from registry metadata (metadata["parents"])
+    and only includes models currently stored in the registry.
+    """
+    try:
+        return _registry.get_lineage_graph(model_id)
+    except KeyError:
+        # Model id not found in the registry
+        raise HTTPException(status_code=404, detail="Model not found")
