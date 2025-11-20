@@ -212,13 +212,13 @@
 
 		(data.items || []).forEach((model) => {
 			const div = document.createElement("div");
-			div.className = "model-card";
-			div.innerHTML = `
-			  <strong>${model.name}</strong><br>
-			  <small>${model.card_summary || "(no summary)"}</small><br>
-			  <button class="lineage-btn" data-id="${model.id}">View Lineage</button>
-			`;
-          container.appendChild(div);
+			  div.className = "model-card";
+			  div.innerHTML = `
+				<strong>${model.name}</strong><br>
+				<small>${model.card_summary || "(no summary)"}</small>
+				<button class="lineage-btn" data-id="${model.id}">View Lineage</button>
+			  `;
+			  container.appendChild(div);
         });
 
         // NEW: hook up the buttons for lineage
