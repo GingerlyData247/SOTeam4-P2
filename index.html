@@ -115,6 +115,7 @@
       <!-- placeholder example: https://github.com/pytorch/fairseq -->
 
       <button onclick="analyzeUrl()">Analyze</button>
+      <button onclick="rateUrl()">Get Score</button>
 
       <h2>Results</h2>
       <pre id="output">Awaiting input...</pre>
@@ -185,6 +186,49 @@
           out.textContent = "Error: " + err.message;
         }
       }
+      async function rateUrl() {
+        const url = document.getElementById("urlInput").value.trim();
+        const out = document.getElementById("output");
+        if (!url) {
+            out.textContent = "Please enter a valid URL.";
+            return;
+        }
+
+        out.textContent = "Computing score...";
+
+        try {
+            const params = new URLSearchParams({ model_ref: url });
+            const res = await fetch(`${API_BASE}/rate/${encodeURIComponent(url)}`, {
+                method: "GET" // Your endpoint is GET, not POST
+            });
+
+            if (!res.ok) {
+                const text = await res.text();
+                try {
+                    const parsed = JSON.parse(text);
+                    out.textContent = `Error ${res.status}: ${parsed.detail ?? text}`;
+                } catch {
+                    out.textContent = `Error ${res.status}: ${text}`;
+                }
+                return;
+            }
+
+            const data = await res.json();
+
+            // Format the scores nicely
+            let displayText = `Net Score: ${data.net}\nLatency: ${data.latency_ms} ms\n\nSub-scores:\n`;
+            for (const [key, value] of Object.entries(data.subs)) {
+                displayText += `- ${key}: ${JSON.stringify(value)}\n`;
+            }
+
+            out.textContent = displayText;
+
+        } catch (err) {
+            console.error(err);
+            out.textContent = "Error: " + err.message;
+        }
+    }
+
 
       // --- Registry search + pagination ---
       let cursor = null; // for pagination
@@ -250,7 +294,7 @@ document.getElementById("search-btn").onclick = async function () {
   display.innerHTML = "";
 
   if (!id) {
-    display.textContent = "⚠️ Please enter a model ID.";
+    display.textContent = "Please enter a model ID.";
     return;
   }
 
@@ -260,7 +304,7 @@ document.getElementById("search-btn").onclick = async function () {
     const res = await fetch(`${API_BASE}/models/${encodeURIComponent(id)}`);
 
     if (res.status === 404) {
-      display.textContent = `❌ Model not found: "${id}"`;
+      display.textContent = `Model not found: "${id}"`;
       return;
     }
 
@@ -381,7 +425,7 @@ document.getElementById("list-models-btn").addEventListener("click", async () =>
         }
 
         // Pretty print
-        let output = "📦 Registered Models:\n\n";
+        let output = "Registered Models:\n\n";
         models.forEach((m, i) => {
             output += `${i + 1}. ${m.name}\n`;
         });
