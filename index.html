@@ -128,18 +128,18 @@
       <button id="search-btn">Search</button>
       <button id="list-models-btn">List All Models</button>
 
-<!-- Display area just for model list -->
-<div id="model-list-display" 
-     style="white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; margin-top: 10px;">
-</div>
+      <!-- Display area just for model list -->
+      <div id="model-list-display" 
+           style="white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; margin-top: 10px;">
+      </div>
 
-	<button id="load-more-btn" style="display: none">Load More</button>
-	<button id="reset-btn" style="background:#dc2626;">Reset Registry</button>
+      <button id="load-more-btn" style="display: none">Load More</button>
+      <button id="reset-btn" style="background:#dc2626;">Reset Registry</button>
       
-	<div id="models-container"></div>
-	  
-	<h2>Lineage</h2>
-	<div id="lineage-view">(Select a model to view its lineage.)</div>
+      <div id="models-container"></div>
+        
+      <h2>Lineage</h2>
+      <div id="lineage-view">(Select a model to view its lineage.)</div>
 
     </main>
 
@@ -190,6 +190,7 @@
           out.textContent = "Error: " + err.message;
         }
       }
+
       async function rateUrl() {
         const url = document.getElementById("urlInput").value.trim();
         const out = document.getElementById("output");
@@ -254,15 +255,15 @@
 
         if (!append) container.innerHTML = "";
 
-		(data.items || []).forEach((model) => {
-			const div = document.createElement("div");
-			  div.className = "model-card";
-			  div.innerHTML = `
-				<strong>${model.name}</strong><br>
-				<small>${model.card_summary || "(no summary)"}</small>
-				<button class="lineage-btn" data-id="${model.id}">View Lineage</button>
-			  `;
-			  container.appendChild(div);
+        (data.items || []).forEach((model) => {
+          const div = document.createElement("div");
+          div.className = "model-card";
+          div.innerHTML = `
+            <strong>${model.name}</strong><br>
+            <small>${model.card_summary || "(no summary)"}</small>
+            <button class="lineage-btn" data-id="${model.id}">View Lineage</button>
+          `;
+          container.appendChild(div);
         });
 
         // NEW: hook up the buttons for lineage
@@ -275,238 +276,230 @@
           : "none";
       }
 
-document
-  .getElementById("search-btn")
-  .addEventListener("click", () => {
-    cursor = null;
-    currentQuery =
-      document.getElementById("search-input").value;
-    fetchModels(currentQuery, false);
-  });
+      // Unified search button behavior:
+      // - empty input: show all models (and lineage buttons) via fetchModels()
+      // - non-empty: exact ID lookup into model-list-display
+      document.getElementById("search-btn").addEventListener("click", async () => {
+        const inputEl = document.getElementById("search-input");
+        const display = document.getElementById("model-list-display");
+        const id = (inputEl.value || "").trim();
 
-      /*
-  Exact-ID search handler
-  - Displays errors for empty input or no matches
-  - Shows model details if exact match found
-  - Shows a small list of suggestions (substring matches) if no exact match
-*/
-document.getElementById("search-btn").onclick = async function () {
-  const inputEl = document.getElementById("search-input");
-  const display = document.getElementById("model-list-display");
-  const id = (inputEl.value || "").trim();
+        display.style.whiteSpace = "pre-wrap";
+        display.innerHTML = "";
 
-  display.style.whiteSpace = "pre-wrap";
-  display.innerHTML = "";
+        if (!id) {
+          // No ID provided: show full list (with lineage buttons)
+          cursor = null;
+          currentQuery = "";
+          fetchModels("", false);
+          display.textContent = "Showing all models.";
+          return;
+        }
 
-  if (!id) {
-    display.textContent = "Please enter a model ID.";
-    return;
-  }
+        display.textContent = "Searching...";
 
-  display.textContent = "Searching...";
+        try {
+          const res = await fetch(`${API_BASE}/models/${encodeURIComponent(id)}`);
 
-  try {
-    const res = await fetch(`${API_BASE}/models/${encodeURIComponent(id)}`);
+          if (res.status === 404) {
+            display.textContent = `Model not found: "${id}"`;
+            return;
+          }
 
-    if (res.status === 404) {
-      display.textContent = `Model not found: "${id}"`;
-      return;
-    }
+          if (!res.ok) {
+            display.textContent = `Error: Server returned status ${res.status}`;
+            return;
+          }
 
-    if (!res.ok) {
-      display.textContent = `Error: Server returned status ${res.status}`;
-      return;
-    }
+          const model = await res.json();
+          display.innerHTML = renderModelCard(model);
+          display.scrollIntoView({ behavior: "smooth", block: "start" });
 
-    const model = await res.json();
-    display.innerHTML = renderModelCard(model);
-    display.scrollIntoView({ behavior: "smooth", block: "start" });
+        } catch (err) {
+          console.error(err);
+          display.textContent = "Unexpected error: " + err.message;
+        }
+      });
 
-  } catch (err) {
-    console.error(err);
-    display.textContent = "Unexpected error: " + err.message;
-  }
-};
+      function renderModelCard(model) {
+        const name = escapeHtml(model.name || "(no name)");
+        const summary = escapeHtml(model.card_summary || "");
+        const url = model.url
+          ? `<a href="${escapeHtml(model.url)}" target="_blank">${escapeHtml(model.url)}</a>`
+          : "(no url)";
+        const version = escapeHtml(model.version || "");
 
-function renderModelCard(model) {
-  const name = escapeHtml(model.name || "(no name)");
-  const summary = escapeHtml(model.card_summary || "");
-  const url = model.url
-    ? `<a href="${escapeHtml(model.url)}" target="_blank">${escapeHtml(model.url)}</a>`
-    : "(no url)";
-  const version = escapeHtml(model.version || "");
+        let metadataStr = "";
+        try {
+          metadataStr = JSON.stringify(model.metadata || model, null, 2);
+        } catch {
+          metadataStr = String(model.metadata || "");
+        }
 
-  let metadataStr = "";
-  try {
-    metadataStr = JSON.stringify(model.metadata || model, null, 2);
-  } catch {
-    metadataStr = String(model.metadata || "");
-  }
+        return `
+          <div class="model-card" style="white-space:pre-wrap;">
+            <strong style="font-size:1.05rem">${name}</strong><br/>
+            <small>Version: ${version} • URL: ${url}</small>
 
-  return `
-    <div class="model-card" style="white-space:pre-wrap;">
-      <strong style="font-size:1.05rem">${name}</strong><br/>
-      <small>Version: ${version} • URL: ${url}</small>
+            <div style="margin-top:0.6rem;">
+              <em>${summary}</em>
+            </div>
 
-      <div style="margin-top:0.6rem;">
-        <em>${summary}</em>
-      </div>
-
-      <details style="margin-top:0.6rem;">
-        <summary>Show raw metadata</summary>
-        <pre style="background:#f3f4f6; padding:8px; border-radius:6px; overflow:auto; max-height:360px;">
+            <details style="margin-top:0.6rem;">
+              <summary>Show raw metadata</summary>
+              <pre style="background:#f3f4f6; padding:8px; border-radius:6px; overflow:auto; max-height:360px;">
 ${escapeHtml(metadataStr)}
-        </pre>
-      </details>
-    </div>
-  `;
-}
+              </pre>
+            </details>
+          </div>
+        `;
+      }
 
-/********************************************************************
- * LINEAGE GRAPH SUPPORT
- * ---------------------------------------------------------------
- * These functions allow the frontend to:
- *   1. Detect clicks on "View Lineage" buttons
- *   2. Call the backend endpoint /models/{id}/lineage
- *   3. Render a simple indented tree of parent → child relationships
- ********************************************************************/
-
-
-/**
- * attachLineageHandlers()
- * ---------------------------------------------------------------
- * After model cards are rendered, this function finds all buttons
- * with class "lineage-btn" and attaches a click handler to each.
- * 
- * This must run ***after*** the model list is drawn, otherwise
- * the buttons won't exist in the DOM.
- */
-function attachLineageHandlers() {
-  // Select every lineage button currently on the page
-  document.querySelectorAll(".lineage-btn").forEach((btn) => {
-    btn.onclick = () => {
-      // Extract the model id stored in the button's HTML tag
-      const id = btn.dataset.id;
-
-      // Call the backend and show the lineage graph
-      loadLineage(id);
-    };
-  });
-}
+      /********************************************************************
+       * LINEAGE GRAPH SUPPORT
+       * ---------------------------------------------------------------
+       * These functions allow the frontend to:
+       *   1. Detect clicks on "View Lineage" buttons
+       *   2. Call the backend endpoint /models/{id}/lineage
+       *   3. Render a simple indented tree of parent → child relationships
+       ********************************************************************/
 
 
-/**
- * loadLineage(modelId)
- * ---------------------------------------------------------------
- * Fetches the lineage graph from the backend for the given model
- * ID and renders it in the #lineage-view section.
- */
-async function loadLineage(modelId) {
-  const box = document.getElementById("lineage-view");
+      /**
+       * attachLineageHandlers()
+       * ---------------------------------------------------------------
+       * After model cards are rendered, this function finds all buttons
+       * with class "lineage-btn" and attaches a click handler to each.
+       * 
+       * This must run ***after*** the model list is drawn, otherwise
+       * the buttons won't exist in the DOM.
+       */
+      function attachLineageHandlers() {
+        // Select every lineage button currently on the page
+        document.querySelectorAll(".lineage-btn").forEach((btn) => {
+          btn.onclick = () => {
+            // Extract the model id stored in the button's HTML tag
+            const id = btn.dataset.id;
 
-  // Show a loading indicator immediately
-  box.textContent = "Loading lineage...";
-
-  try {
-    // Call the backend API route created
-    const res = await fetch(`${API_BASE}/models/${modelId}/lineage`);
-
-    if (!res.ok) {
-      box.textContent = `Error loading lineage (${res.status})`;
-      return;
-    }
-
-    // Parse the lineage graph JSON
-    const graph = await res.json();
-
-    // Convert graph JSON → HTML indentation tree
-    box.innerHTML = renderLineageTree(graph);
-
-  } catch (err) {
-    // If network error, etc.
-    box.textContent = "Error: " + err.message;
-  }
-}
+            // Call the backend and show the lineage graph
+            loadLineage(id);
+          };
+        });
+      }
 
 
-/**
- * renderLineageTree(graph)
- * ---------------------------------------------------------------
- * Turns a lineage graph into simple HTML.
- *
- * Example input:
- * {
- *   root_id: "...",
- *   nodes: [{ id, name }, ...],
- *   edges: [{ parent, child }, ...]
- * }
- *
- * Output is indented HTML like:
- *
- *    • facebook/wav2vec2-base
- *        • facebook/wav2vec2-large
- */
-function renderLineageTree(graph) {
+      /**
+       * loadLineage(modelId)
+       * ---------------------------------------------------------------
+       * Fetches the lineage graph from the backend for the given model
+       * ID and renders it in the #lineage-view section.
+       */
+      async function loadLineage(modelId) {
+        const box = document.getElementById("lineage-view");
 
-  /***************************************************************
-   * 1. Convert list of nodes into a lookup table:
-   *      nodesById["abc123"] = { id: "...", name: "..." }
-   ***************************************************************/
-  const nodesById = {};
-  (graph.nodes || []).forEach((n) => {
-    nodesById[n.id] = n;
-  });
+        // Show a loading indicator immediately
+        box.textContent = "Loading lineage...";
 
+        try {
+          // Call the backend API route created
+          const res = await fetch(`${API_BASE}/models/${modelId}/lineage`);
 
-  /***************************************************************
-   * 2. Group children by parent ID
-   *    Example:
-   *      children["A"] = ["B", "C"]
-   ***************************************************************/
-  const children = {};
-  (graph.edges || []).forEach((e) => {
-    (children[e.parent] = children[e.parent] || []).push(e.child);
-  });
+          if (!res.ok) {
+            box.textContent = `Error loading lineage (${res.status})`;
+            return;
+          }
+
+          // Parse the lineage graph JSON
+          const graph = await res.json();
+
+          // Convert graph JSON → HTML indentation tree
+          box.innerHTML = renderLineageTree(graph);
+
+        } catch (err) {
+          // If network error, etc.
+          box.textContent = "Error: " + err.message;
+        }
+      }
 
 
-  /***************************************************************
-   * 3. Recursive function to draw each node and its descendants.
-   *    "depth" controls indentation.
-   ***************************************************************/
-  function renderNode(id, depth = 0, seen = new Set()) {
+      /**
+       * renderLineageTree(graph)
+       * ---------------------------------------------------------------
+       * Turns a lineage graph into simple HTML.
+       *
+       * Example input:
+       * {
+       *   root_id: "...",
+       *   nodes: [{ id, name }, ...],
+       *   edges: [{ parent, child }, ...]
+       * }
+       *
+       * Output is indented HTML like:
+       *
+       *    • facebook/wav2vec2-base
+       *        • facebook/wav2vec2-large
+       */
+      function renderLineageTree(graph) {
 
-    // Prevent infinite loops (just in case)
-    if (!nodesById[id] || seen.has(id)) return "";
-    seen.add(id);
-
-    // Render this model at the correct indentation
-    let html = `<div style="margin-left:${depth * 16}px">• ${
-      nodesById[id].name
-    }</div>`;
-
-    // Render all children of this node
-    (children[id] || []).forEach((childId) => {
-      html += renderNode(childId, depth + 1, seen);
-    });
-
-    return html;
-  }
+        /***************************************************************
+         * 1. Convert list of nodes into a lookup table:
+         *      nodesById["abc123"] = { id: "...", name: "..." }
+         ***************************************************************/
+        const nodesById = {};
+        (graph.nodes || []).forEach((n) => {
+          nodesById[n.id] = n;
+        });
 
 
-  /***************************************************************
-   * 4. Render the entire tree starting at the root model
-   ***************************************************************/
-  return renderNode(graph.root_id);
-}
+        /***************************************************************
+         * 2. Group children by parent ID
+         *    Example:
+         *      children["A"] = ["B", "C"]
+         ***************************************************************/
+        const children = {};
+        (graph.edges || []).forEach((e) => {
+          (children[e.parent] = children[e.parent] || []).push(e.child);
+        });
 
-function escapeHtml(s) {
-  return String(s || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
+
+        /***************************************************************
+         * 3. Recursive function to draw each node and its descendants.
+         *    "depth" controls indentation.
+         ***************************************************************/
+        function renderNode(id, depth = 0, seen = new Set()) {
+
+          // Prevent infinite loops (just in case)
+          if (!nodesById[id] || seen.has(id)) return "";
+          seen.add(id);
+
+          // Render this model at the correct indentation
+          let html = `<div style="margin-left:${depth * 16}px">• ${
+            nodesById[id].name
+          }</div>`;
+
+          // Render all children of this node
+          (children[id] || []).forEach((childId) => {
+            html += renderNode(childId, depth + 1, seen);
+          });
+
+          return html;
+        }
+
+
+        /***************************************************************
+         * 4. Render the entire tree starting at the root model
+         ***************************************************************/
+        return renderNode(graph.root_id);
+      }
+
+      function escapeHtml(s) {
+        return String(s || "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
 
 
       document
@@ -516,80 +509,71 @@ function escapeHtml(s) {
         });
 
       // --- Reset registry ---
-document.getElementById("reset-btn").addEventListener("click", async () => {
-  if (!confirm("Are you sure you want to reset the registry?")) return;
+      document.getElementById("reset-btn").addEventListener("click", async () => {
+        if (!confirm("Are you sure you want to reset the registry?")) return;
 
-  try {
-    const res = await fetch(`${API_BASE}/reset`, {
-      method: "DELETE",
-    });
+        try {
+          const res = await fetch(`${API_BASE}/reset`, {
+            method: "DELETE",
+          });
 
-    if (!res.ok) {
-      const text = await res.text();
-      alert(`Reset failed: ${text}`);
-      return;
-    }
+          if (!res.ok) {
+            const text = await res.text();
+            alert(`Reset failed: ${text}`);
+            return;
+          }
 
-    alert("Registry successfully reset!");
+          alert("Registry successfully reset!");
 
-    // clear UI + reload
-    document.getElementById("models-container").innerHTML = "";
-    cursor = null;
-    fetchModels();
-  } catch (err) {
-    alert("Error: " + err.message);
-  }
-});
+          // clear UI + reload
+          document.getElementById("models-container").innerHTML = "";
+          cursor = null;
+          fetchModels();
+        } catch (err) {
+          alert("Error: " + err.message);
+        }
+      });
 
       // initial load
       fetchModels();
     </script>
 
-<script>
-document.getElementById("list-models-btn").addEventListener("click", async () => {
-    const display = document.getElementById("model-list-display");
-    display.textContent = "Loading...";
+    <script>
+    document.getElementById("list-models-btn").addEventListener("click", async () => {
+        const display = document.getElementById("model-list-display");
+        display.textContent = "Loading...";
 
-    try {
-        // limit must be <= 100
-        const response = await fetch(`${API_BASE}/models?limit=100`);
+        try {
+            // limit must be <= 100
+            const response = await fetch(`${API_BASE}/models?limit=100`);
 
-        if (!response.ok) {
-            throw new Error(`Request failed (${response.status})`);
+            if (!response.ok) {
+                throw new Error(`Request failed (${response.status})`);
+            }
+
+            const page = await response.json();
+            const models = page.items || [];
+
+            if (models.length === 0) {
+                display.textContent = "No models found.";
+                return;
+            }
+
+            // Pretty print
+            let output = "Registered Models:\n\n";
+            models.forEach((m, i) => {
+                output += `${i + 1}. ${m.name}\n`;
+            });
+
+            display.textContent = output;
+
+        } catch (err) {
+            display.textContent = "Error: " + err.message;
         }
-
-        const page = await response.json();
-        const models = page.items || [];
-
-        if (models.length === 0) {
-            display.textContent = "No models found.";
-            return;
-        }
-
-        // Pretty print
-        let output = "Registered Models:\n\n";
-        models.forEach((m, i) => {
-            output += `${i + 1}. ${m.name}\n`;
-        });
-
-        display.textContent = output;
-
-    } catch (err) {
-        display.textContent = "Error: " + err.message;
-    }
-});
-</script>
+    });
+    </script>
 
 
 
   </body>
 </html>
-
-
-
-
-
-
-
-
-
