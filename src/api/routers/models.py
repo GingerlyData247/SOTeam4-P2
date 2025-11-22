@@ -107,6 +107,16 @@ def ingest_huggingface(model_ref: str = Query(...)):
     # Normalize reference
     hf_id = normalize_hf_id(model_ref)
     hf_url = f"https://huggingface.co/{hf_id}"
+    # ------------------------------------------------------------------
+    # Fetch license from HuggingFace (store it in the registry metadata)
+    # ------------------------------------------------------------------
+    try:
+        license_resp = requests.get(f"https://huggingface.co/api/models/{hf_id}")
+        hf_meta = license_resp.json()
+        hf_license = (hf_meta.get("license") or "").lower()
+    except Exception:
+        hf_license = ""
+
 
     # Prepare scoring request (for Phase 1-style metrics)
     base_resource = {
@@ -144,6 +154,8 @@ def ingest_huggingface(model_ref: str = Query(...)):
     # ------------------------------------------------------------------
     # 1. Create registry entry with full metadata (metrics + parents)
     # ------------------------------------------------------------------
+    # Store the license inside metadata
+    result["license"] = hf_license
     doc = ModelCreate(name=hf_id, url=hf_url, version="1.0", metadata=result)
     created = _registry.create(doc)
     model_id = created["id"]
@@ -265,7 +277,9 @@ async def license_check(model_id: str, request: LicenseCheckRequest):
 
     # Get HuggingFace license
     try:
-        model_license = fetch_hf_license(hf_id)
+        model_license = item["metadata"].get("license", "")
+        if not model_license:
+            raise HTTPException(status_code=500, detail="Model has no license stored. Re-ingest the model.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch model license: {e}")
 
