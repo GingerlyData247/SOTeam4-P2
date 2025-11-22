@@ -3,12 +3,11 @@ from pydantic import BaseModel
 from urllib.parse import urlparse
 import requests
 
-from src.services.registry import RegistryService
+from src.api.routers.models import _registry  # <-- This is the fix!
 from src.api.internal.license import get_license_for_model
 
-router = APIRouter()
 
-_registry = RegistryService()  # shared registry instance
+router = APIRouter()
 
 class LicenseCheckRequest(BaseModel):
     github_url: str
