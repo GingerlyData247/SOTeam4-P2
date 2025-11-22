@@ -211,50 +211,32 @@ def get_lineage(model_id: str):
 
 #License Check--------------------------------------------------------------
 
-class LicenseCheckRequest(BaseModel):
-    github_url: str
-
-LICENSE_COMPATIBILITY = {
-    "apache-2.0": {"mit", "bsd-3-clause", "bsd-2-clause", "apache-2.0"},
-    "mit": {"mit", "bsd-3-clause", "bsd-2-clause"},
-    "bsd-3-clause": {"bsd-3-clause", "mit"},
-    "bsd-2-clause": {"bsd-2-clause", "mit"},
-    "gpl-3.0": set(),       # restrictive
-    "cc-by-4.0": set(),     # not suitable for commercial AI reuse
-}
-def extract_repo_info(url: str):
-    parsed = urlparse(url)
-    parts = parsed.path.strip("/").split("/")
-    if len(parts) < 2:
-        raise ValueError("Invalid GitHub URL. Expected: https://github.com/<owner>/<repo>")
-    return parts[0], parts[1]
-
-
-def fetch_github_license(owner: str, repo: str):
-    api_url = f"https://api.github.com/repos/{owner}/{repo}/license"
-    resp = requests.get(api_url, headers={"Accept": "application/vnd.github+json"})
-
-    if resp.status_code == 200:
-        return resp.json()["license"]["spdx_id"].lower()
-
-    raise ValueError("Unable to determine GitHub license.")
 @router.post("/models/{model_id}/license-check")
 async def license_check(model_id: str, request: LicenseCheckRequest):
     from src.api.internal.license import get_license_for_model
 
-    # Get Model License
-    model_license = get_license_for_model(model_id)
-    if not model_license:
+    # STEP 1: Look up model entry by UUID
+    model_entry = _registry.get(model_id)
+    if not model_entry:
         raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found in registry.")
 
-    # Get GitHub License
+    # Extract the HuggingFace model name you ingested (e.g. "openai/whisper-tiny")
+    model_name = model_entry["name"]
+
+    # STEP 2: Get model license using HuggingFace ID (name)
+    try:
+        model_license = get_license_for_model(model_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch model license: {e}")
+
+    # STEP 3: Fetch GitHub license
     try:
         owner, repo = extract_repo_info(request.github_url)
         github_license = fetch_github_license(owner, repo)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Compare for Fine-Tune + Inference
+    # STEP 4: Compare
     compatible = github_license in LICENSE_COMPATIBILITY.get(model_license, set())
 
     reason = (
@@ -265,9 +247,11 @@ async def license_check(model_id: str, request: LicenseCheckRequest):
 
     return {
         "model_id": model_id,
+        "model_name": model_name,
         "model_license": model_license,
         "github_license": github_license,
         "compatible": compatible,
         "reason": reason
     }
+
 
