@@ -93,9 +93,11 @@ def rate_model(model_ref: str):
 def ingest_huggingface(model_ref: str = Query(...)):
     import io
     import zipfile
+
     from src.utils.hf_normalize import normalize_hf_id
     from src.run import compute_metrics_for_model
     from src.services.storage import get_storage
+    from src.metrics.treescore import extract_parents_from_resource
 
     storage = get_storage()
 
@@ -103,8 +105,8 @@ def ingest_huggingface(model_ref: str = Query(...)):
     hf_id = normalize_hf_id(model_ref)
     hf_url = f"https://huggingface.co/{hf_id}"
 
-    # Prepare scoring request
-    resource = {
+    # Prepare scoring request (for Phase 1-style metrics)
+    base_resource = {
         "name": hf_id,
         "url": hf_url,
         "github_url": None,
@@ -113,52 +115,63 @@ def ingest_huggingface(model_ref: str = Query(...)):
         "category": "MODEL",
     }
 
-    # Compute metrics
-    result = compute_metrics_for_model(resource)
+    # Compute metrics (Phase 1 pipeline)
+    result = compute_metrics_for_model(base_resource)
 
-    # Validate threshold
+    # Validate threshold (keep your existing reviewedness gate)
     reviewedness = result.get("reviewedness", 0.0)
     if reviewedness < 0.5:
         raise HTTPException(
             400, f"Ingest rejected: reviewedness={reviewedness:.2f} < 0.50"
         )
 
-    # -----------------------------------------
-    # 1. Create registry entry FIRST
-    # -----------------------------------------
+    # ------------------------------------------------------------------
+    # Lineage: build a rich HF resource and extract parents
+    # ------------------------------------------------------------------
+    try:
+        # Uses ScoringService internals to fetch config/tags/etc.
+        enriched_resource = _scoring._build_resource(hf_id)  # type: ignore[attr-defined]
+        parents = extract_parents_from_resource(enriched_resource)
+    except Exception:
+        parents = []
+
+    # Inject lineage information into metadata
+    result["parents"] = parents
+
+    # ------------------------------------------------------------------
+    # 1. Create registry entry with full metadata (metrics + parents)
+    # ------------------------------------------------------------------
     doc = ModelCreate(name=hf_id, url=hf_url, version="1.0", metadata=result)
     created = _registry.create(doc)
     model_id = created["id"]
 
-    # -----------------------------------------
-    # 2. Build a tiny ZIP file for S3
-    # -----------------------------------------
+    # ------------------------------------------------------------------
+    # 2. Build a tiny ZIP file for S3 (or other storage)
+    # ------------------------------------------------------------------
     mem_zip = io.BytesIO()
     with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
-        # Inside ZIP → a small file containing the source URL
+        # Inside ZIP: a tiny text file recording the source HF URL
         z.writestr("source_url.txt", hf_url)
 
     zip_bytes = mem_zip.getvalue()
 
-    # -----------------------------------------
-    # 3. Store ZIP in S3
-    # -----------------------------------------
+    # ------------------------------------------------------------------
+    # 3. Store ZIP blob
+    # ------------------------------------------------------------------
     key = f"artifacts/model/{model_id}.zip"
     storage.put_bytes(key, zip_bytes)
 
-    # -----------------------------------------
+    # ------------------------------------------------------------------
     # 4. Generate presigned download URL
-    # -----------------------------------------
+    # ------------------------------------------------------------------
     presigned_url = storage.presign(key)
 
-    # -----------------------------------------
-    # 5. Update metadata for the registry
-    # -----------------------------------------
+    # ------------------------------------------------------------------
+    # 5. Attach download_url to metadata (same dict stored in registry)
+    # ------------------------------------------------------------------
     created["metadata"]["download_url"] = presigned_url
-    created["metadata"].setdefault("parents", [])
 
     return created
-
 
 
 @router.delete("/reset", status_code=200)
@@ -166,7 +179,7 @@ def reset_system():
     _registry.reset()
     try:
         _scoring.reset()
-    except:
+    except Exception:
         pass
     return {"status": "registry reset"}
 
