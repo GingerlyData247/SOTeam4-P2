@@ -127,8 +127,24 @@
       <button id="search-btn">Search</button>
       <button id="list-models-btn">List All Models</button>
 
-      <div id="model-list-display" 
-        style="white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; margin-top: 10px;">
+      <!-- license checker------------------------------------ -->
+<h3>License Check</h3>
+
+<label for="license-model-input">Model ID:</label>
+<input id="license-model-input" type="text" placeholder="e.g. google-bert/bert-base-uncased">
+
+<label for="license-github-input">GitHub Repo URL:</label>
+<input id="license-github-input" type="text" placeholder="https://github.com/owner/repo">
+
+<button id="license-check-btn">Check License Compatibility</button>
+
+<!-- Where license results will be displayed -->
+<div id="license-check-result" style="white-space: pre-wrap; margin-top: 10px;"></div>
+
+      <!-- license checker------------------------------------ -->
+
+      <div id="model-list-display"
+           style="white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; margin-top: 10px;">
       </div>
 
       <button id="load-more-btn" style="display: none">Load More</button>
@@ -429,7 +445,63 @@
           display.textContent = "Error: " + err.message;
         }
       });
+
+      // License Check Button Handler
+document.getElementById("license-check-btn").addEventListener("click", async () => {
+    const modelId = document.getElementById("license-model-input").value.trim();
+    const repoUrl = document.getElementById("license-github-input").value.trim();
+    const output = document.getElementById("license-check-result");
+
+    output.innerHTML = "";
+
+    if (!modelId || !repoUrl) {
+        output.innerHTML = "<p style='color:red; font-weight:bold;'>❗ Enter both a Model ID and a GitHub URL.</p>";
+        return;
+    }
+
+    output.innerHTML = "Checking license compatibility...";
+
+    try {
+        const response = await fetch(`${API_BASE}/models/${encodeURIComponent(modelId)}/license-check`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ github_url: repoUrl })
+        });
+
+        let data;
+        try {
+            data = await response.json();
+        } catch {
+            data = {};
+        }
+
+        if (!response.ok) {
+            output.innerHTML = `
+                <p style='color:red; font-weight:bold;'>❌ Error ${response.status}</p>
+                <p>${data.detail ?? "Unexpected server error."}</p>
+            `;
+            return;
+        }
+
+        output.innerHTML = `
+            <strong>Model:</strong> ${data.model_id}<br>
+            <strong>Model License:</strong> ${data.model_license}<br>
+            <strong>GitHub License:</strong> ${data.github_license}<br>
+            <strong>Compatible:</strong> ${data.compatible ? "✅ Yes" : "❌ No"}<br><br>
+            <strong>Reason:</strong> ${data.reason}
+        `;
+
+    } catch (err) {
+        output.innerHTML = `
+            <p style='color:red; font-weight:bold;'>❌ Network error</p>
+            <p>${err.message}</p>
+        `;
+    }
+});
+
     </script>
 
   </body>
 </html>
+
+
