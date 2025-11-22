@@ -209,8 +209,91 @@ def get_lineage(model_id: str):
         raise HTTPException(status_code=404, detail="Model not found")
 
 
+
 #License Check--------------------------------------------------------------
-from .license_check import router as license_router
-router.include_router(license_router)
+# ------------------------------------------------------------------------
+# License Check (self-contained, no circular imports)
+# ------------------------------------------------------------------------
+
+class LicenseCheckRequest(BaseModel):
+    github_url: str
+
+# Minimal SPDX lookup for compatibility
+LICENSE_COMPATIBILITY = {
+    "apache-2.0": {"mit", "bsd-3-clause", "bsd-2-clause", "apache-2.0"},
+    "mit": {"mit", "bsd-3-clause", "bsd-2-clause"},
+    "bsd-3-clause": {"bsd-3-clause", "mit"},
+    "bsd-2-clause": {"bsd-2-clause", "mit"},
+    "gpl-3.0": set(),
+    "cc-by-4.0": set(),
+}
+
+def fetch_hf_license(hf_id: str) -> str:
+    """
+    Fetch license from HuggingFace model card via HF API.
+    This avoids importing internal licensing modules and prevents circular imports.
+    """
+    api_url = f"https://huggingface.co/api/models/{hf_id}"
+    resp = requests.get(api_url)
+    if resp.status_code != 200:
+        raise ValueError(f"Unable to fetch HF metadata for {hf_id}")
+    data = resp.json()
+    return (data.get("license") or "").lower()
+
+def extract_repo_info(url: str):
+    parsed = urlparse(url)
+    parts = parsed.path.strip("/").split("/")
+    if len(parts) < 2:
+        raise ValueError("Invalid GitHub URL. Expected: https://github.com/<owner>/<repo>")
+    return parts[0], parts[1]
+
+def fetch_github_license(owner: str, repo: str):
+    api_url = f"https://api.github.com/repos/{owner}/{repo}/license"
+    resp = requests.get(api_url, headers={"Accept": "application/vnd.github+json"})
+    if resp.status_code == 200:
+        return resp.json()["license"]["spdx_id"].lower()
+    raise ValueError("Unable to determine the GitHub project's license.")
+
+@router.post("/models/{model_id}/license-check")
+async def license_check(model_id: str, request: LicenseCheckRequest):
+    # Fetch model entry from existing registry
+    item = _registry.get(model_id)
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found.")
+
+    hf_id = item["name"]
+
+    # Get HuggingFace license
+    try:
+        model_license = fetch_hf_license(hf_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch model license: {e}")
+
+    # Get GitHub license
+    try:
+        owner, repo = extract_repo_info(request.github_url)
+        github_license = fetch_github_license(owner, repo)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Compare
+    compatible = github_license in LICENSE_COMPATIBILITY.get(model_license, set())
+    reason = (
+        f"{github_license.upper()} is compatible with {model_license.upper()}."
+        if compatible else
+        f"{github_license.upper()} is NOT compatible with {model_license.upper()} for fine-tune + inference."
+    )
+
+    return {
+        "model_id": model_id,
+        "model_name": hf_id,
+        "model_license": model_license,
+        "github_license": github_license,
+        "compatible": compatible,
+        "reason": reason,
+    }
+
+#from .license_check import router as license_router
+#router.include_router(license_router)
 
 
