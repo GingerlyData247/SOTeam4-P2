@@ -91,7 +91,6 @@
       }
     </style>
   </head>
-
   <body>
     <header>
       <h1>Trustworthy Model Registry</h1>
@@ -118,7 +117,7 @@
       <button onclick="rateUrl()">Get Score</button>
 
       <h2>Results</h2>
-      <div id="output">Awaiting input...</div>
+      <pre id="output">Awaiting input...</pre>
 
       <input
         id="search-input"
@@ -128,32 +127,31 @@
       <button id="search-btn">Search</button>
       <button id="list-models-btn">List All Models</button>
 
-      <div id="model-list-display"
-           style="white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; margin-top: 10px;">
+      <div id="model-list-display" 
+        style="white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; margin-top: 10px;">
       </div>
 
-      <button id="load-more-btn" style="display:none">Load More</button>
+      <button id="load-more-btn" style="display: none">Load More</button>
       <button id="reset-btn" style="background:#dc2626;">Reset Registry</button>
 
       <div id="models-container"></div>
 
       <h2>Lineage</h2>
       <div id="lineage-view">(Select a model to view its lineage.)</div>
+
     </main>
 
     <footer>© 2025 Team 4 • Purdue ECE/SWE 45000 • Phase 2</footer>
 
     <script>
-      const API_BASE =
-        "https://c1r52eygxi.execute-api.us-east-2.amazonaws.com/api";
+      const API_BASE = "https://c1r52eygxi.execute-api.us-east-2.amazonaws.com/api";
 
-      /* --------------------------
-         UPDATED analyzeUrl()
-         -------------------------- */
+      /* ----------------------------
+           UPDATED ANALYZE URL
+         ---------------------------- */
       async function analyzeUrl() {
         const url = document.getElementById("urlInput").value.trim();
         const out = document.getElementById("output");
-
         if (!url) {
           out.textContent = "Please enter a valid URL.";
           return;
@@ -163,7 +161,8 @@
 
         try {
           const params = new URLSearchParams({ model_ref: url });
-          const res = await fetch(`${API_BASE}/ingest?${params}`, {
+
+          const res = await fetch(`${API_BASE}/ingest?${params.toString()}`, {
             method: "POST",
           });
 
@@ -171,9 +170,7 @@
             const txt = await res.text();
             try {
               const parsed = JSON.parse(txt);
-              out.textContent = `Error ${res.status}: ${
-                parsed.detail ?? txt
-              }`;
+              out.textContent = `Error ${res.status}: ${parsed.detail ?? txt}`;
             } catch {
               out.textContent = `Error ${res.status}: ${txt}`;
             }
@@ -182,19 +179,12 @@
 
           const data = await res.json();
 
-          // 🔥 NEW: download button if URL exists
+          /* Show download link cleanly */
           if (data?.metadata?.download_url) {
-            out.innerHTML = `
-              <pre>${JSON.stringify(data, null, 2)}</pre>
-              <button onclick="window.location.href='${data.metadata.download_url}'">
-                Download Model Artifact (.zip)
-              </button>
-            `;
-            return;
+            data.download_link = data.metadata.download_url;
           }
 
-          // If no download URL, fallback
-          out.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+          out.textContent = JSON.stringify(data, null, 2);
 
         } catch (err) {
           console.error(err);
@@ -202,7 +192,6 @@
         }
       }
 
-      /* Everything BELOW here is unchanged — your original file */
       async function rateUrl() {
         const url = document.getElementById("urlInput").value.trim();
         const out = document.getElementById("output");
@@ -217,14 +206,12 @@
           const res = await fetch(`${API_BASE}/rate/${encodeURIComponent(url)}`);
 
           if (!res.ok) {
-            const text = await res.text();
+            const txt = await res.text();
             try {
-              const parsed = JSON.parse(text);
-              out.textContent = `Error ${res.status}: ${
-                parsed.detail ?? text
-              }`;
+              const parsed = JSON.parse(txt);
+              out.textContent = `Error ${res.status}: ${parsed.detail ?? txt}`;
             } catch {
-              out.textContent = `Error ${res.status}: ${text}`;
+              out.textContent = `Error ${res.status}: ${txt}`;
             }
             return;
           }
@@ -232,28 +219,32 @@
           const data = await res.json();
 
           let text = `Net Score: ${data.net}\nLatency: ${data.latency_ms} ms\n\nSub-scores:\n`;
-          for (const [k, v] of Object.entries(data.subs)) {
-            text += `- ${k}: ${JSON.stringify(v)}\n`;
+          for (const [key, value] of Object.entries(data.subs)) {
+            text += `- ${key}: ${JSON.stringify(value)}\n`;
           }
 
           out.textContent = text;
 
         } catch (err) {
+          console.error(err);
           out.textContent = "Error: " + err.message;
         }
       }
 
-      /* ---------------- registry + lineage logic unchanged ---------------- */
+      /* ----------------------------
+         Registry list + lineage
+         (unchanged)
+         ---------------------------- */
 
       let cursor = null;
       let currentQuery = "";
 
-      async function fetchModels(query="", append=false) {
+      async function fetchModels(query = "", append = false) {
         const params = new URLSearchParams({ limit: 10 });
         if (query) params.append("q", query);
         if (cursor) params.append("cursor", cursor);
 
-        const resp = await fetch(`${API_BASE}/models?${params}`);
+        const resp = await fetch(`${API_BASE}/models?${params.toString()}`);
         if (!resp.ok) return;
 
         const data = await resp.json();
@@ -266,35 +257,34 @@
           div.className = "model-card";
           div.innerHTML = `
             <strong>${model.name}</strong><br>
-            <small>${model.card_summary || "(no summary)"}</small>
+            <small>${(model.metadata?.card || "").substring(0, 120) || "(no summary)"}</small>
+
             <button class="lineage-btn" data-id="${model.id}">View Lineage</button>
           `;
           container.appendChild(div);
         });
 
         attachLineageHandlers();
-        cursor = data.next_cursor || null;
 
-        document.getElementById("load-more-btn").style.display =
-          cursor ? "inline-block" : "none";
+        cursor = data.next_cursor || null;
+        document.getElementById("load-more-btn").style.display = cursor
+          ? "inline-block"
+          : "none";
       }
 
-      document.getElementById("search-btn").addEventListener("click", () => {
-        cursor = null;
-        currentQuery = document.getElementById("search-input").value;
-        fetchModels(currentQuery, false);
-      });
-
       document.getElementById("search-btn").onclick = async function () {
-        const id = document.getElementById("search-input").value.trim();
+        const inputEl = document.getElementById("search-input");
         const display = document.getElementById("model-list-display");
+        const id = (inputEl.value || "").trim();
 
-        display.textContent = "Searching...";
+        display.innerHTML = "";
 
         if (!id) {
           display.textContent = "Please enter a model ID.";
           return;
         }
+
+        display.textContent = "Searching...";
 
         try {
           const res = await fetch(`${API_BASE}/models/${encodeURIComponent(id)}`);
@@ -304,18 +294,40 @@
             return;
           }
 
-          if (!res.ok) {
-            display.textContent = `Error: ${res.status}`;
-            return;
-          }
-
           const model = await res.json();
-          display.textContent = JSON.stringify(model, null, 2);
+          display.innerHTML = renderModelCard(model);
 
-        } catch (e) {
-          display.textContent = "Error: " + e.message;
+        } catch (err) {
+          display.textContent = "Unexpected error: " + err.message;
         }
       };
+
+      function renderModelCard(model) {
+        const name = escapeHtml(model.name || "(no name)");
+        const version = escapeHtml(model.version || "");
+        const url = model.url
+          ? `<a href="${escapeHtml(model.url)}" target="_blank">${escapeHtml(model.url)}</a>`
+          : "(no url)";
+
+        let metadataStr = "";
+        try {
+          metadataStr = JSON.stringify(model.metadata || model, null, 2);
+        } catch {
+          metadataStr = String(model.metadata || "");
+        }
+
+        return `
+          <div class="model-card" style="white-space:pre-wrap;">
+            <strong style="font-size:1.05rem">${name}</strong><br/>
+            <small>Version: ${version} • URL: ${url}</small>
+
+            <details style="margin-top:0.6rem;">
+              <summary>Show raw metadata</summary>
+              <pre>${escapeHtml(metadataStr)}</pre>
+            </details>
+          </div>
+        `;
+      }
 
       function attachLineageHandlers() {
         document.querySelectorAll(".lineage-btn").forEach((btn) => {
@@ -330,15 +342,49 @@
         try {
           const res = await fetch(`${API_BASE}/models/${modelId}/lineage`);
           if (!res.ok) {
-            box.textContent = `Error loading lineage (${res.status})`;
+            box.textContent = "Error loading lineage";
             return;
           }
           const graph = await res.json();
-          box.innerHTML = JSON.stringify(graph, null, 2);
+          box.innerHTML = renderLineageTree(graph);
 
-        } catch (e) {
-          box.textContent = "Error: " + e.message;
+        } catch (err) {
+          box.textContent = "Error: " + err.message;
         }
+      }
+
+      function renderLineageTree(graph) {
+        const nodes = {};
+        (graph.nodes || []).forEach((n) => (nodes[n.id] = n));
+
+        const children = {};
+        (graph.edges || []).forEach((e) => {
+          (children[e.parent] = children[e.parent] || []).push(e.child);
+        });
+
+        function render(id, depth = 0, seen = new Set()) {
+          if (!nodes[id] || seen.has(id)) return "";
+          seen.add(id);
+
+          let html = `<div style="margin-left:${depth * 16}px">• ${nodes[id].name}</div>`;
+
+          (children[id] || []).forEach((child) => {
+            html += render(child, depth + 1, seen);
+          });
+
+          return html;
+        }
+
+        return render(graph.root_id);
+      }
+
+      function escapeHtml(s) {
+        return String(s || "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
       }
 
       document.getElementById("load-more-btn").addEventListener("click", () => {
@@ -346,11 +392,17 @@
       });
 
       document.getElementById("reset-btn").addEventListener("click", async () => {
-        if (!confirm("Are you sure?")) return;
-        await fetch(`${API_BASE}/reset`, { method: "DELETE" });
-        document.getElementById("models-container").innerHTML = "";
-        cursor = null;
-        fetchModels();
+        if (!confirm("Reset registry?")) return;
+
+        try {
+          const res = await fetch(`${API_BASE}/reset`, { method: "DELETE" });
+          alert("Registry reset.");
+          document.getElementById("models-container").innerHTML = "";
+          cursor = null;
+          fetchModels();
+        } catch (err) {
+          alert("Error: " + err.message);
+        }
       });
 
       fetchModels();
@@ -364,17 +416,20 @@
         try {
           const response = await fetch(`${API_BASE}/models?limit=100`);
           const page = await response.json();
+          const models = page.items || [];
 
           let output = "Registered Models:\n\n";
-          (page.items || []).forEach((m, i) => {
+          models.forEach((m, i) => {
             output += `${i + 1}. ${m.name}\n`;
           });
 
           display.textContent = output;
-        } catch (e) {
-          display.textContent = "Error: " + e.message;
+
+        } catch (err) {
+          display.textContent = "Error: " + err.message;
         }
       });
     </script>
+
   </body>
 </html>
