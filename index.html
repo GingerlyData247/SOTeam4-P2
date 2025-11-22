@@ -128,6 +128,22 @@
       <button id="search-btn">Search</button>
       <button id="list-models-btn">List All Models</button>
 
+      // license checker------------------------------------
+<h3>License Check</h3>
+
+<label for="license-model-input">Model ID:</label>
+<input id="license-model-input" placeholder="e.g. google-bert/bert-base-uncased">
+
+<label for="license-github-input">GitHub Repo URL:</label>
+<input id="license-github-input" placeholder="https://github.com/owner/repo">
+
+<button id="license-check-btn">Check License Compatibility</button>
+
+<!-- Where license results will be displayed -->
+<div id="license-check-result" style="white-space: pre-wrap; margin-top: 10px;"></div>
+
+      // License Checker------------------------------------
+
       <div id="model-list-display"
            style="white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; margin-top: 10px;">
       </div>
@@ -375,6 +391,48 @@
           display.textContent = "Error: " + e.message;
         }
       });
+
+      // License Check Button Handler
+document.getElementById("license-check-btn").addEventListener("click", async () => {
+    const modelId = document.getElementById("license-model-input").value.trim();
+    const repoUrl = document.getElementById("license-github-input").value.trim();
+    const output = document.getElementById("license-check-result");
+
+    output.innerHTML = "";
+
+    if (!modelId || !repoUrl) {
+        output.innerHTML = "<p style='color:red'>Please enter both a Model ID and a GitHub URL.</p>";
+        return;
+    }
+
+    output.innerHTML = "Checking license compatibility...";
+
+    try {
+        const response = await fetch(`${API_BASE}/models/${encodeURIComponent(modelId)}/license-check`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ github_url: repoUrl })
+        });
+
+        if (!response.ok) {
+            const errJson = await response.json();
+            output.innerHTML = `<p style='color:red'>Error: ${errJson.detail}</p>`;
+            return;
+        }
+
+        const result = await response.json();
+
+        output.innerHTML =
+            `<strong>Model:</strong> ${result.model_id}\n` +
+            `<strong>Model License:</strong> ${result.model_license}\n` +
+            `<strong>GitHub License:</strong> ${result.github_license}\n` +
+            `<strong>Compatible:</strong> ${result.compatible ? "Yes" : "No"}\n\n` +
+            `<strong>Reason:</strong> ${result.reason}`;
+    } catch (err) {
+        output.innerHTML = `<p style='color:red'>Request failed: ${err.message}</p>`;
+    }
+});
     </script>
   </body>
 </html>
+
