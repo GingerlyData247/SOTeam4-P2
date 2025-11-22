@@ -238,8 +238,8 @@ def fetch_github_license(owner: str, repo: str):
         return resp.json()["license"]["spdx_id"].lower()
 
     raise ValueError("Unable to determine GitHub license.")
-@router.post("/models/{model_name}/license-check")
-async def license_check(model_name: str, request: LicenseCheckRequest):
+@router.post("/models/{model_id}/license-check")
+async def license_check(model_id: str, request: LicenseCheckRequest):
     from src.api.internal.license import get_license_for_model
 
     # Get Model License
@@ -253,12 +253,6 @@ async def license_check(model_name: str, request: LicenseCheckRequest):
         github_license = fetch_github_license(owner, repo)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-    #check model 
-    model_entry = registry.get_model_by_name(model_name)
-if not model_entry:
-    raise 404
-
 
     # Compare for Fine-Tune + Inference
     compatible = github_license in LICENSE_COMPATIBILITY.get(model_license, set())
