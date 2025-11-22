@@ -7,7 +7,6 @@ from ...schemas.models import ModelCreate, ModelUpdate, ModelOut, Page
 from ...services.registry import RegistryService
 from ...services.ingest import IngestService
 from ...services.scoring import ScoringService
-#from ...services.storage import StorageService   # ⭐ ADD THIS
 
 _START_TIME = time.time()
 
@@ -16,7 +15,6 @@ router = APIRouter()
 _registry = RegistryService()
 _ingest = IngestService(registry=_registry)
 _scoring = ScoringService()
-#_storage = StorageService()  # ⭐ ADD THIS
 
 
 @router.post("/models", response_model=ModelOut, status_code=201)
@@ -93,12 +91,18 @@ def rate_model(model_ref: str):
 
 @router.post("/ingest", response_model=ModelOut, status_code=201)
 def ingest_huggingface(model_ref: str = Query(...)):
+    import requests
     from src.utils.hf_normalize import normalize_hf_id
     from src.run import compute_metrics_for_model
+    from src.services.storage import get_storage
 
+    storage = get_storage()
+
+    # Normalize reference
     hf_id = normalize_hf_id(model_ref)
     hf_url = f"https://huggingface.co/{hf_id}"
 
+    # Prepare scoring request
     resource = {
         "name": hf_id,
         "url": hf_url,
@@ -108,26 +112,50 @@ def ingest_huggingface(model_ref: str = Query(...)):
         "category": "MODEL",
     }
 
+    # Compute metrics
     result = compute_metrics_for_model(resource)
 
+    # Validate threshold
     reviewedness = result.get("reviewedness", 0.0)
     if reviewedness < 0.5:
-        raise HTTPException(400, f"Ingest rejected: reviewedness={reviewedness:.2f} < 0.50")
+        raise HTTPException(
+            400, f"Ingest rejected: reviewedness={reviewedness:.2f} < 0.50"
+        )
 
+    # Download (fallback to storing the URL if blocked)
+    try:
+        raw = requests.get(hf_url, timeout=10)
+        raw.raise_for_status()
+        content_bytes = raw.content
+    except Exception:
+        content_bytes = hf_url.encode("utf-8")
+
+    # Create registry entry first
     doc = ModelCreate(name=hf_id, url=hf_url, version="1.0", metadata=result)
+    created = _registry.create(doc)
+    model_id = created["id"]
 
-    return _registry.create(doc)
+    # Store artifact
+    key = f"artifacts/model/{model_id}.bin"
+    storage.put_bytes(key, content_bytes)
+
+    # Generate download URL
+    presigned_url = storage.presign(key)
+
+    # Add download_url + maintain parents structure
+    created["metadata"]["download_url"] = presigned_url
+    created["metadata"].setdefault("parents", [])
+
+    return created
 
 
 @router.delete("/reset", status_code=200)
 def reset_system():
     _registry.reset()
-    #_storage.reset()     # ⭐ REQUIRED
     try:
         _scoring.reset()
     except:
         pass
-
     return {"status": "registry reset"}
 
 
@@ -147,14 +175,7 @@ def get_tracks():
 
 @router.get("/models/{model_id}/lineage")
 def get_lineage(model_id: str):
-    """
-    Return the lineage graph for a given model id.
-
-    The graph is derived only from registry metadata (metadata["parents"])
-    and only includes models currently stored in the registry.
-    """
     try:
         return _registry.get_lineage_graph(model_id)
     except KeyError:
-        # Model id not found in the registry
         raise HTTPException(status_code=404, detail="Model not found")
