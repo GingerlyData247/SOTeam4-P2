@@ -210,48 +210,7 @@ def get_lineage(model_id: str):
 
 
 #License Check--------------------------------------------------------------
-
-@router.post("/models/{model_id}/license-check")
-async def license_check(model_id: str, request: LicenseCheckRequest):
-    from src.api.internal.license import get_license_for_model
-
-    # STEP 1: Look up model entry by UUID
-    model_entry = _registry.get(model_id)
-    if not model_entry:
-        raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found in registry.")
-
-    # Extract the HuggingFace model name you ingested (e.g. "openai/whisper-tiny")
-    model_name = model_entry["name"]
-
-    # STEP 2: Get model license using HuggingFace ID (name)
-    try:
-        model_license = get_license_for_model(model_name)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch model license: {e}")
-
-    # STEP 3: Fetch GitHub license
-    try:
-        owner, repo = extract_repo_info(request.github_url)
-        github_license = fetch_github_license(owner, repo)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    # STEP 4: Compare
-    compatible = github_license in LICENSE_COMPATIBILITY.get(model_license, set())
-
-    reason = (
-        f"{github_license.upper()} is compatible with {model_license.upper()}."
-        if compatible else
-        f"{github_license.upper()} is NOT compatible with {model_license.upper()} for fine-tune + inference."
-    )
-
-    return {
-        "model_id": model_id,
-        "model_name": model_name,
-        "model_license": model_license,
-        "github_license": github_license,
-        "compatible": compatible,
-        "reason": reason
-    }
+from .license_check import router as license_router
+router.include_router(license_router)
 
 
