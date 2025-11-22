@@ -112,7 +112,6 @@
         type="text"
         placeholder="facebook/wav2vec2-base or HF URL"
       />
-      <!-- placeholder example: https://github.com/pytorch/fairseq -->
 
       <button onclick="analyzeUrl()">Analyze</button>
       <button onclick="rateUrl()">Get Score</button>
@@ -128,16 +127,15 @@
       <button id="search-btn">Search</button>
       <button id="list-models-btn">List All Models</button>
 
-      <!-- Display area just for model list -->
       <div id="model-list-display" 
-           style="white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; margin-top: 10px;">
+        style="white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; margin-top: 10px;">
       </div>
 
       <button id="load-more-btn" style="display: none">Load More</button>
       <button id="reset-btn" style="background:#dc2626;">Reset Registry</button>
-      
+
       <div id="models-container"></div>
-        
+
       <h2>Lineage</h2>
       <div id="lineage-view">(Select a model to view its lineage.)</div>
 
@@ -146,9 +144,11 @@
     <footer>© 2025 Team 4 • Purdue ECE/SWE 45000 • Phase 2</footer>
 
     <script>
-      const API_BASE =
-        "https://c1r52eygxi.execute-api.us-east-2.amazonaws.com/api";
+      const API_BASE = "https://c1r52eygxi.execute-api.us-east-2.amazonaws.com/api";
 
+      /* ----------------------------
+           UPDATED ANALYZE URL
+         ---------------------------- */
       async function analyzeUrl() {
         const url = document.getElementById("urlInput").value.trim();
         const out = document.getElementById("output");
@@ -160,31 +160,32 @@
         out.textContent = "Processing...";
 
         try {
-          // Build ?model_ref=<url> for the ingest endpoint
           const params = new URLSearchParams({ model_ref: url });
 
-          const res = await fetch(
-            `${API_BASE}/ingest?${params.toString()}`,
-            {
-              method: "POST", // no JSON body, no extra headers
-            }
-          );
+          const res = await fetch(`${API_BASE}/ingest?${params.toString()}`, {
+            method: "POST",
+          });
 
           if (!res.ok) {
-            const text = await res.text();
+            const txt = await res.text();
             try {
-              const parsed = JSON.parse(text);
-              out.textContent = `Error ${res.status}: ${
-                parsed.detail ?? text
-              }`;
+              const parsed = JSON.parse(txt);
+              out.textContent = `Error ${res.status}: ${parsed.detail ?? txt}`;
             } catch {
-              out.textContent = `Error ${res.status}: ${text}`;
+              out.textContent = `Error ${res.status}: ${txt}`;
             }
             return;
           }
 
           const data = await res.json();
+
+          /* Show download link cleanly */
+          if (data?.metadata?.download_url) {
+            data.download_link = data.metadata.download_url;
+          }
+
           out.textContent = JSON.stringify(data, null, 2);
+
         } catch (err) {
           console.error(err);
           out.textContent = "Error: " + err.message;
@@ -195,48 +196,47 @@
         const url = document.getElementById("urlInput").value.trim();
         const out = document.getElementById("output");
         if (!url) {
-            out.textContent = "Please enter a valid URL.";
-            return;
+          out.textContent = "Please enter a valid URL.";
+          return;
         }
 
         out.textContent = "Computing score...";
 
         try {
-            const params = new URLSearchParams({ model_ref: url });
-            const res = await fetch(`${API_BASE}/rate/${encodeURIComponent(url)}`, {
-                method: "GET" // Your endpoint is GET, not POST
-            });
+          const res = await fetch(`${API_BASE}/rate/${encodeURIComponent(url)}`);
 
-            if (!res.ok) {
-                const text = await res.text();
-                try {
-                    const parsed = JSON.parse(text);
-                    out.textContent = `Error ${res.status}: ${parsed.detail ?? text}`;
-                } catch {
-                    out.textContent = `Error ${res.status}: ${text}`;
-                }
-                return;
+          if (!res.ok) {
+            const txt = await res.text();
+            try {
+              const parsed = JSON.parse(txt);
+              out.textContent = `Error ${res.status}: ${parsed.detail ?? txt}`;
+            } catch {
+              out.textContent = `Error ${res.status}: ${txt}`;
             }
+            return;
+          }
 
-            const data = await res.json();
+          const data = await res.json();
 
-            // Format the scores nicely
-            let displayText = `Net Score: ${data.net}\nLatency: ${data.latency_ms} ms\n\nSub-scores:\n`;
-            for (const [key, value] of Object.entries(data.subs)) {
-                displayText += `- ${key}: ${JSON.stringify(value)}\n`;
-            }
+          let text = `Net Score: ${data.net}\nLatency: ${data.latency_ms} ms\n\nSub-scores:\n`;
+          for (const [key, value] of Object.entries(data.subs)) {
+            text += `- ${key}: ${JSON.stringify(value)}\n`;
+          }
 
-            out.textContent = displayText;
+          out.textContent = text;
 
         } catch (err) {
-            console.error(err);
-            out.textContent = "Error: " + err.message;
+          console.error(err);
+          out.textContent = "Error: " + err.message;
         }
-    }
+      }
 
+      /* ----------------------------
+         Registry list + lineage
+         (unchanged)
+         ---------------------------- */
 
-      // --- Registry search + pagination ---
-      let cursor = null; // for pagination
+      let cursor = null;
       let currentQuery = "";
 
       async function fetchModels(query = "", append = false) {
@@ -245,10 +245,7 @@
         if (cursor) params.append("cursor", cursor);
 
         const resp = await fetch(`${API_BASE}/models?${params.toString()}`);
-        if (!resp.ok) {
-          console.error("Failed to fetch models", resp.status);
-          return;
-        }
+        if (!resp.ok) return;
 
         const data = await resp.json();
         const container = document.getElementById("models-container");
@@ -266,33 +263,23 @@
           container.appendChild(div);
         });
 
-        // NEW: hook up the buttons for lineage
         attachLineageHandlers();
 
-        // handle pagination
         cursor = data.next_cursor || null;
         document.getElementById("load-more-btn").style.display = cursor
           ? "inline-block"
           : "none";
       }
 
-      // Unified search button behavior:
-      // - empty input: show all models (and lineage buttons) via fetchModels()
-      // - non-empty: exact ID lookup into model-list-display
-      document.getElementById("search-btn").addEventListener("click", async () => {
+      document.getElementById("search-btn").onclick = async function () {
         const inputEl = document.getElementById("search-input");
         const display = document.getElementById("model-list-display");
         const id = (inputEl.value || "").trim();
 
-        display.style.whiteSpace = "pre-wrap";
         display.innerHTML = "";
 
         if (!id) {
-          // No ID provided: show full list (with lineage buttons)
-          cursor = null;
-          currentQuery = "";
-          fetchModels("", false);
-          display.textContent = "Showing all models.";
+          display.textContent = "Please enter a model ID.";
           return;
         }
 
@@ -306,28 +293,20 @@
             return;
           }
 
-          if (!res.ok) {
-            display.textContent = `Error: Server returned status ${res.status}`;
-            return;
-          }
-
           const model = await res.json();
           display.innerHTML = renderModelCard(model);
-          display.scrollIntoView({ behavior: "smooth", block: "start" });
 
         } catch (err) {
-          console.error(err);
           display.textContent = "Unexpected error: " + err.message;
         }
-      });
+      };
 
       function renderModelCard(model) {
         const name = escapeHtml(model.name || "(no name)");
-        const summary = escapeHtml(model.card_summary || "");
+        const version = escapeHtml(model.version || "");
         const url = model.url
           ? `<a href="${escapeHtml(model.url)}" target="_blank">${escapeHtml(model.url)}</a>`
           : "(no url)";
-        const version = escapeHtml(model.version || "");
 
         let metadataStr = "";
         try {
@@ -341,155 +320,61 @@
             <strong style="font-size:1.05rem">${name}</strong><br/>
             <small>Version: ${version} • URL: ${url}</small>
 
-            <div style="margin-top:0.6rem;">
-              <em>${summary}</em>
-            </div>
-
             <details style="margin-top:0.6rem;">
               <summary>Show raw metadata</summary>
-              <pre style="background:#f3f4f6; padding:8px; border-radius:6px; overflow:auto; max-height:360px;">
-${escapeHtml(metadataStr)}
-              </pre>
+              <pre>${escapeHtml(metadataStr)}</pre>
             </details>
           </div>
         `;
       }
 
-      /********************************************************************
-       * LINEAGE GRAPH SUPPORT
-       * ---------------------------------------------------------------
-       * These functions allow the frontend to:
-       *   1. Detect clicks on "View Lineage" buttons
-       *   2. Call the backend endpoint /models/{id}/lineage
-       *   3. Render a simple indented tree of parent → child relationships
-       ********************************************************************/
-
-
-      /**
-       * attachLineageHandlers()
-       * ---------------------------------------------------------------
-       * After model cards are rendered, this function finds all buttons
-       * with class "lineage-btn" and attaches a click handler to each.
-       * 
-       * This must run ***after*** the model list is drawn, otherwise
-       * the buttons won't exist in the DOM.
-       */
       function attachLineageHandlers() {
-        // Select every lineage button currently on the page
         document.querySelectorAll(".lineage-btn").forEach((btn) => {
-          btn.onclick = () => {
-            // Extract the model id stored in the button's HTML tag
-            const id = btn.dataset.id;
-
-            // Call the backend and show the lineage graph
-            loadLineage(id);
-          };
+          btn.onclick = () => loadLineage(btn.dataset.id);
         });
       }
 
-
-      /**
-       * loadLineage(modelId)
-       * ---------------------------------------------------------------
-       * Fetches the lineage graph from the backend for the given model
-       * ID and renders it in the #lineage-view section.
-       */
       async function loadLineage(modelId) {
         const box = document.getElementById("lineage-view");
-
-        // Show a loading indicator immediately
         box.textContent = "Loading lineage...";
 
         try {
-          // Call the backend API route created
           const res = await fetch(`${API_BASE}/models/${modelId}/lineage`);
-
           if (!res.ok) {
-            box.textContent = `Error loading lineage (${res.status})`;
+            box.textContent = "Error loading lineage";
             return;
           }
-
-          // Parse the lineage graph JSON
           const graph = await res.json();
-
-          // Convert graph JSON → HTML indentation tree
           box.innerHTML = renderLineageTree(graph);
 
         } catch (err) {
-          // If network error, etc.
           box.textContent = "Error: " + err.message;
         }
       }
 
-
-      /**
-       * renderLineageTree(graph)
-       * ---------------------------------------------------------------
-       * Turns a lineage graph into simple HTML.
-       *
-       * Example input:
-       * {
-       *   root_id: "...",
-       *   nodes: [{ id, name }, ...],
-       *   edges: [{ parent, child }, ...]
-       * }
-       *
-       * Output is indented HTML like:
-       *
-       *    • facebook/wav2vec2-base
-       *        • facebook/wav2vec2-large
-       */
       function renderLineageTree(graph) {
+        const nodes = {};
+        (graph.nodes || []).forEach((n) => (nodes[n.id] = n));
 
-        /***************************************************************
-         * 1. Convert list of nodes into a lookup table:
-         *      nodesById["abc123"] = { id: "...", name: "..." }
-         ***************************************************************/
-        const nodesById = {};
-        (graph.nodes || []).forEach((n) => {
-          nodesById[n.id] = n;
-        });
-
-
-        /***************************************************************
-         * 2. Group children by parent ID
-         *    Example:
-         *      children["A"] = ["B", "C"]
-         ***************************************************************/
         const children = {};
         (graph.edges || []).forEach((e) => {
           (children[e.parent] = children[e.parent] || []).push(e.child);
         });
 
-
-        /***************************************************************
-         * 3. Recursive function to draw each node and its descendants.
-         *    "depth" controls indentation.
-         ***************************************************************/
-        function renderNode(id, depth = 0, seen = new Set()) {
-
-          // Prevent infinite loops (just in case)
-          if (!nodesById[id] || seen.has(id)) return "";
+        function render(id, depth = 0, seen = new Set()) {
+          if (!nodes[id] || seen.has(id)) return "";
           seen.add(id);
 
-          // Render this model at the correct indentation
-          let html = `<div style="margin-left:${depth * 16}px">• ${
-            nodesById[id].name
-          }</div>`;
+          let html = `<div style="margin-left:${depth * 16}px">• ${nodes[id].name}</div>`;
 
-          // Render all children of this node
-          (children[id] || []).forEach((childId) => {
-            html += renderNode(childId, depth + 1, seen);
+          (children[id] || []).forEach((child) => {
+            html += render(child, depth + 1, seen);
           });
 
           return html;
         }
 
-
-        /***************************************************************
-         * 4. Render the entire tree starting at the root model
-         ***************************************************************/
-        return renderNode(graph.root_id);
+        return render(graph.root_id);
       }
 
       function escapeHtml(s) {
@@ -501,31 +386,16 @@ ${escapeHtml(metadataStr)}
           .replaceAll("'", "&#39;");
       }
 
+      document.getElementById("load-more-btn").addEventListener("click", () => {
+        fetchModels(currentQuery, true);
+      });
 
-      document
-        .getElementById("load-more-btn")
-        .addEventListener("click", () => {
-          fetchModels(currentQuery, true);
-        });
-
-      // --- Reset registry ---
       document.getElementById("reset-btn").addEventListener("click", async () => {
-        if (!confirm("Are you sure you want to reset the registry?")) return;
+        if (!confirm("Reset registry?")) return;
 
         try {
-          const res = await fetch(`${API_BASE}/reset`, {
-            method: "DELETE",
-          });
-
-          if (!res.ok) {
-            const text = await res.text();
-            alert(`Reset failed: ${text}`);
-            return;
-          }
-
-          alert("Registry successfully reset!");
-
-          // clear UI + reload
+          const res = await fetch(`${API_BASE}/reset`, { method: "DELETE" });
+          alert("Registry reset.");
           document.getElementById("models-container").innerHTML = "";
           cursor = null;
           fetchModels();
@@ -534,46 +404,31 @@ ${escapeHtml(metadataStr)}
         }
       });
 
-      // initial load
       fetchModels();
     </script>
 
     <script>
-    document.getElementById("list-models-btn").addEventListener("click", async () => {
+      document.getElementById("list-models-btn").addEventListener("click", async () => {
         const display = document.getElementById("model-list-display");
         display.textContent = "Loading...";
 
         try {
-            // limit must be <= 100
-            const response = await fetch(`${API_BASE}/models?limit=100`);
+          const response = await fetch(`${API_BASE}/models?limit=100`);
+          const page = await response.json();
+          const models = page.items || [];
 
-            if (!response.ok) {
-                throw new Error(`Request failed (${response.status})`);
-            }
+          let output = "Registered Models:\n\n";
+          models.forEach((m, i) => {
+            output += `${i + 1}. ${m.name}\n`;
+          });
 
-            const page = await response.json();
-            const models = page.items || [];
-
-            if (models.length === 0) {
-                display.textContent = "No models found.";
-                return;
-            }
-
-            // Pretty print
-            let output = "Registered Models:\n\n";
-            models.forEach((m, i) => {
-                output += `${i + 1}. ${m.name}\n`;
-            });
-
-            display.textContent = output;
+          display.textContent = output;
 
         } catch (err) {
-            display.textContent = "Error: " + err.message;
+          display.textContent = "Error: " + err.message;
         }
-    });
+      });
     </script>
-
-
 
   </body>
 </html>
