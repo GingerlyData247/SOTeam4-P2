@@ -91,7 +91,8 @@ def rate_model(model_ref: str):
 
 @router.post("/ingest", response_model=ModelOut, status_code=201)
 def ingest_huggingface(model_ref: str = Query(...)):
-    import requests
+    import io
+    import zipfile
     from src.utils.hf_normalize import normalize_hf_id
     from src.run import compute_metrics_for_model
     from src.services.storage import get_storage
@@ -122,31 +123,42 @@ def ingest_huggingface(model_ref: str = Query(...)):
             400, f"Ingest rejected: reviewedness={reviewedness:.2f} < 0.50"
         )
 
-    # Download (fallback to storing the URL if blocked)
-    try:
-        raw = requests.get(hf_url, timeout=10)
-        raw.raise_for_status()
-        content_bytes = raw.content
-    except Exception:
-        content_bytes = hf_url.encode("utf-8")
-
-    # Create registry entry first
+    # -----------------------------------------
+    # 1. Create registry entry FIRST
+    # -----------------------------------------
     doc = ModelCreate(name=hf_id, url=hf_url, version="1.0", metadata=result)
     created = _registry.create(doc)
     model_id = created["id"]
 
-    # Store artifact
-    key = f"artifacts/model/{model_id}.bin"
-    storage.put_bytes(key, content_bytes)
+    # -----------------------------------------
+    # 2. Build a tiny ZIP file for S3
+    # -----------------------------------------
+    mem_zip = io.BytesIO()
+    with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
+        # Inside ZIP → a small file containing the source URL
+        z.writestr("source_url.txt", hf_url)
 
-    # Generate download URL
+    zip_bytes = mem_zip.getvalue()
+
+    # -----------------------------------------
+    # 3. Store ZIP in S3
+    # -----------------------------------------
+    key = f"artifacts/model/{model_id}.zip"
+    storage.put_bytes(key, zip_bytes)
+
+    # -----------------------------------------
+    # 4. Generate presigned download URL
+    # -----------------------------------------
     presigned_url = storage.presign(key)
 
-    # Add download_url + maintain parents structure
+    # -----------------------------------------
+    # 5. Update metadata for the registry
+    # -----------------------------------------
     created["metadata"]["download_url"] = presigned_url
     created["metadata"].setdefault("parents", [])
 
     return created
+
 
 
 @router.delete("/reset", status_code=200)
