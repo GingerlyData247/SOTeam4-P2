@@ -91,6 +91,7 @@
       }
     </style>
   </head>
+
   <body>
     <header>
       <h1>Trustworthy Model Registry</h1>
@@ -117,44 +118,45 @@
       <button onclick="rateUrl()">Get Score</button>
 
       <h2>Results</h2>
-      <pre id="output">Awaiting input...</pre>
+      <div id="output">Awaiting input...</div>
 
-      <input
-        id="search-input"
-        type="text"
-        placeholder="Search models (regex)"
-      />
+      <input id="search-input" type="text" placeholder="Search models (regex)" />
       <button id="search-btn">Search</button>
       <button id="list-models-btn">List All Models</button>
 
-      <!-- license checker------------------------------------ -->
-<h3>License Check</h3>
+      <!-- License Checker -->
+      <h3>License Check</h3>
 
-<label for="license-model-input">Model ID:</label>
-<input id="license-model-input" type="text" placeholder="e.g. google-bert/bert-base-uncased">
+      <label for="license-model-input">Model ID:</label>
+      <input
+        id="license-model-input"
+        type="text"
+        placeholder="e.g. google-bert/bert-base-uncased"
+      />
 
-<label for="license-github-input">GitHub Repo URL:</label>
-<input id="license-github-input" type="text" placeholder="https://github.com/owner/repo">
+      <label for="license-github-input">GitHub Repo URL:</label>
+      <input
+        id="license-github-input"
+        type="text"
+        placeholder="https://github.com/owner/repo"
+      />
 
-<button id="license-check-btn">Check License Compatibility</button>
+      <button id="license-check-btn">Check License Compatibility</button>
 
-<!-- Where license results will be displayed -->
-<div id="license-check-result" style="white-space: pre-wrap; margin-top: 10px;"></div>
+      <div id="license-check-result" style="white-space: pre-wrap; margin-top: 10px;"></div>
 
-      <!-- license checker------------------------------------ -->
+      <div
+        id="model-list-display"
+        style="white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; margin-top: 10px;"
+      ></div>
 
-      <div id="model-list-display"
-           style="white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; margin-top: 10px;">
-      </div>
-
-      <button id="load-more-btn" style="display: none">Load More</button>
+      <button id="load-more-btn" style="display:none">Load More</button>
       <button id="reset-btn" style="background:#dc2626;">Reset Registry</button>
 
       <div id="models-container"></div>
 
       <h2>Lineage</h2>
       <div id="lineage-view">(Select a model to view its lineage.)</div>
-
     </main>
 
     <footer>© 2025 Team 4 • Purdue ECE/SWE 45000 • Phase 2</footer>
@@ -162,9 +164,9 @@
     <script>
       const API_BASE = "https://c1r52eygxi.execute-api.us-east-2.amazonaws.com/api";
 
-      /* ----------------------------
-           UPDATED ANALYZE URL
-         ---------------------------- */
+      /* --------------------------------------
+         ANALYZE URL  (Download button restored)
+         -------------------------------------- */
       async function analyzeUrl() {
         const url = document.getElementById("urlInput").value.trim();
         const out = document.getElementById("output");
@@ -177,7 +179,6 @@
 
         try {
           const params = new URLSearchParams({ model_ref: url });
-
           const res = await fetch(`${API_BASE}/ingest?${params.toString()}`, {
             method: "POST",
           });
@@ -195,19 +196,30 @@
 
           const data = await res.json();
 
-          /* Show download link cleanly */
+          /* ------------------------------
+             DOWNLOAD BUTTON IS BACK
+             ------------------------------ */
           if (data?.metadata?.download_url) {
-            data.download_link = data.metadata.download_url;
+            out.innerHTML = `
+              <pre>${JSON.stringify(data, null, 2)}</pre>
+              <button onclick="window.location.href='${data.metadata.download_url}'">
+                Download Model Artifact (.zip)
+              </button>
+            `;
+            return;
           }
 
-          out.textContent = JSON.stringify(data, null, 2);
+          // fallback
+          out.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
 
         } catch (err) {
-          console.error(err);
           out.textContent = "Error: " + err.message;
         }
       }
 
+      /* ----------------------------
+         RATE
+         ---------------------------- */
       async function rateUrl() {
         const url = document.getElementById("urlInput").value.trim();
         const out = document.getElementById("output");
@@ -242,14 +254,12 @@
           out.textContent = text;
 
         } catch (err) {
-          console.error(err);
           out.textContent = "Error: " + err.message;
         }
       }
 
       /* ----------------------------
          Registry list + lineage
-         (unchanged)
          ---------------------------- */
 
       let cursor = null;
@@ -274,7 +284,6 @@
           div.innerHTML = `
             <strong>${model.name}</strong><br>
             <small>${(model.metadata?.card || "").substring(0, 120) || "(no summary)"}</small>
-
             <button class="lineage-btn" data-id="${model.id}">View Lineage</button>
           `;
           container.appendChild(div);
@@ -291,6 +300,7 @@
       document.getElementById("search-btn").onclick = async function () {
         const inputEl = document.getElementById("search-input");
         const display = document.getElementById("model-list-display");
+
         const id = (inputEl.value || "").trim();
 
         display.innerHTML = "";
@@ -411,7 +421,7 @@
         if (!confirm("Reset registry?")) return;
 
         try {
-          const res = await fetch(`${API_BASE}/reset`, { method: "DELETE" });
+          await fetch(`${API_BASE}/reset`, { method: "DELETE" });
           alert("Registry reset.");
           document.getElementById("models-container").innerHTML = "";
           cursor = null;
@@ -425,6 +435,7 @@
     </script>
 
     <script>
+      // list models button
       document.getElementById("list-models-btn").addEventListener("click", async () => {
         const display = document.getElementById("model-list-display");
         display.textContent = "Loading...";
@@ -446,61 +457,59 @@
         }
       });
 
-      // License Check Button Handler
-document.getElementById("license-check-btn").addEventListener("click", async () => {
-    const modelId = document.getElementById("license-model-input").value.trim();
-    const repoUrl = document.getElementById("license-github-input").value.trim();
-    const output = document.getElementById("license-check-result");
+      // license check handler
+      document.getElementById("license-check-btn").addEventListener("click", async () => {
+        const modelId = document.getElementById("license-model-input").value.trim();
+        const repoUrl = document.getElementById("license-github-input").value.trim();
+        const output = document.getElementById("license-check-result");
 
-    output.innerHTML = "";
+        output.innerHTML = "";
 
-    if (!modelId || !repoUrl) {
-        output.innerHTML = "<p style='color:red; font-weight:bold;'>❗ Enter both a Model ID and a GitHub URL.</p>";
-        return;
-    }
+        if (!modelId || !repoUrl) {
+          output.innerHTML = "<p style='color:red; font-weight:bold;'>❗ Enter both a Model ID and a GitHub URL.</p>";
+          return;
+        }
 
-    output.innerHTML = "Checking license compatibility...";
+        output.innerHTML = "Checking license compatibility...";
 
-    try {
-        const response = await fetch(`${API_BASE}/models/${encodeURIComponent(modelId)}/license-check`, {
+        try {
+          const response = await fetch(`${API_BASE}/models/${encodeURIComponent(modelId)}/license-check`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ github_url: repoUrl })
-        });
+          });
 
-        let data;
-        try {
+          let data;
+          try {
             data = await response.json();
-        } catch {
+          } catch {
             data = {};
-        }
+          }
 
-        if (!response.ok) {
+          if (!response.ok) {
             output.innerHTML = `
-                <p style='color:red; font-weight:bold;'>❌ Error ${response.status}</p>
-                <p>${data.detail ?? "Unexpected server error."}</p>
+              <p style='color:red; font-weight:bold;'>❌ Error ${response.status}</p>
+              <p>${data.detail ?? "Unexpected server error."}</p>
             `;
             return;
-        }
+          }
 
-        output.innerHTML = `
+          output.innerHTML = `
             <strong>Model:</strong> ${data.model_id}<br>
             <strong>Model License:</strong> ${data.model_license}<br>
             <strong>GitHub License:</strong> ${data.github_license}<br>
             <strong>Compatible:</strong> ${data.compatible ? "✅ Yes" : "❌ No"}<br><br>
             <strong>Reason:</strong> ${data.reason}
-        `;
+          `;
 
-    } catch (err) {
-        output.innerHTML = `
+        } catch (err) {
+          output.innerHTML = `
             <p style='color:red; font-weight:bold;'>❌ Network error</p>
             <p>${err.message}</p>
-        `;
-    }
-});
-
+          `;
+        }
+      });
     </script>
 
   </body>
 </html>
-
