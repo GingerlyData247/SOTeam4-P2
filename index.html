@@ -197,8 +197,13 @@
 
           /* Show download link cleanly */
           if (data?.metadata?.download_url) {
-            data.download_link = data.metadata.download_url;
-          }
+                  out.innerHTML = `
+              <pre>${JSON.stringify(data, null, 2)}</pre>
+              <button onclick="window.location.href='${data.metadata.download_url}'">
+                Download Model Artifact (.zip)
+              </button>
+            `;
+            return;
 
           out.textContent = JSON.stringify(data, null, 2);
 
@@ -503,5 +508,6 @@ document.getElementById("license-check-btn").addEventListener("click", async () 
 
   </body>
 </html>
+
 
 
