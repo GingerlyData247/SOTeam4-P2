@@ -107,31 +107,35 @@
       </p>
 
       <h2>Try it Out</h2>
-      <p>Enter a model or repository URL to classify and analyze:</p>
+      <p>Enter a Hugging Face model id or URL to ingest & analyze:</p>
       <input
         id="urlInput"
         type="text"
-        placeholder="facebook/wav2vec2-base or HF URL"
+        placeholder="google-bert/bert-base-uncased or HF URL"
       />
 
-      <button onclick="analyzeUrl()">Analyze</button>
-      <button onclick="rateUrl()">Get Score</button>
+      <button onclick="analyzeUrl()">Analyze (ingest + score)</button>
+      <button onclick="rateUrl()">Get Score (last ingested)</button>
 
       <h2>Results</h2>
-      <div id="output">Awaiting input...</div>
+      <pre id="output">Awaiting input...</pre>
 
-      <input id="search-input" type="text" placeholder="Search models (regex)" />
+      <input
+        id="search-input"
+        type="text"
+        placeholder="Search models by artifact id (exact)"
+      />
       <button id="search-btn">Search</button>
       <button id="list-models-btn">List All Models</button>
 
       <!-- License Checker -->
       <h3>License Check</h3>
 
-      <label for="license-model-input">Model ID:</label>
+      <label for="license-model-input">Artifact ID (optional – uses last ingested if blank):</label>
       <input
         id="license-model-input"
         type="text"
-        placeholder="e.g. google-bert/bert-base-uncased"
+        placeholder="e.g. 5e212792-8c80-4a50-9abd-431aa229760c"
       />
 
       <label for="license-github-input">GitHub Repo URL:</label>
@@ -143,7 +147,10 @@
 
       <button id="license-check-btn">Check License Compatibility</button>
 
-      <div id="license-check-result" style="white-space: pre-wrap; margin-top: 10px;"></div>
+      <div
+        id="license-check-result"
+        style="white-space: pre-wrap; margin-top: 10px;"
+      ></div>
 
       <div
         id="model-list-display"
@@ -162,25 +169,40 @@
     <footer>© 2025 Team 4 • Purdue ECE/SWE 45000 • Phase 2</footer>
 
     <script>
+      // NOTE: for AWS Gateway you keep the /api stage here.
+      // For local uvicorn testing, set API_BASE = "http://127.0.0.1:8000"
       const API_BASE = "https://c1r52eygxi.execute-api.us-east-2.amazonaws.com/api";
 
+      let lastArtifactId = null;
+      let artifactsOffset = "";
+
+      function hfUrlFromInput(raw) {
+        const v = raw.trim();
+        if (!v) return null;
+        if (v.startsWith("http://") || v.startsWith("https://")) return v;
+        return `https://huggingface.co/${v}`;
+      }
+
       /* --------------------------------------
-         ANALYZE URL  (Download button restored)
+         ANALYZE URL  (ingest + score + download)
          -------------------------------------- */
       async function analyzeUrl() {
-        const url = document.getElementById("urlInput").value.trim();
+        const raw = document.getElementById("urlInput").value;
         const out = document.getElementById("output");
+
+        const url = hfUrlFromInput(raw);
         if (!url) {
-          out.textContent = "Please enter a valid URL.";
+          out.textContent = "Please enter a valid HF id or URL.";
           return;
         }
 
-        out.textContent = "Processing...";
+        out.textContent = "Ingesting artifact...";
 
         try {
-          const params = new URLSearchParams({ model_ref: url });
-          const res = await fetch(`${API_BASE}/ingest?${params.toString()}`, {
+          const res = await fetch(`${API_BASE}/artifact/model`, {
             method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url }),
           });
 
           if (!res.ok) {
@@ -194,44 +216,80 @@
             return;
           }
 
-          const data = await res.json();
+          const artifact = await res.json();
+          lastArtifactId = artifact.metadata.id;
 
-          /* ------------------------------
-             DOWNLOAD BUTTON IS BACK
-             ------------------------------ */
-          if (data?.metadata?.download_url) {
-            out.innerHTML = `
-              <pre>${JSON.stringify(data, null, 2)}</pre>
-              <button onclick="window.location.href='${data.metadata.download_url}'">
-                Download Model Artifact (.zip)
-              </button>
-            `;
+          out.textContent = `Ingested artifact:\n${JSON.stringify(
+            artifact,
+            null,
+            2
+          )}\n\nFetching rating...`;
+
+          // Immediately fetch rating to match old "Analyze" behavior
+          const rateRes = await fetch(
+            `${API_BASE}/artifact/model/${encodeURIComponent(
+              lastArtifactId
+            )}/rate`
+          );
+
+          if (!rateRes.ok) {
+            const txt = await rateRes.text();
+            out.textContent += `\nRating error ${rateRes.status}: ${txt}`;
             return;
           }
 
-          // fallback
-          out.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+          const rating = await rateRes.json();
 
+          let text = `Ingested Artifact ID: ${artifact.metadata.id}\nModel: ${
+            artifact.metadata.name
+          }\nSource URL: ${artifact.data.url}\n\n`;
+
+          if (artifact.data.download_url) {
+            text += `Download URL: ${artifact.data.download_url}\n\n`;
+          }
+
+          text += `Net Score: ${rating.net_score}\n\nAll Metrics:\n${JSON.stringify(
+            rating,
+            null,
+            2
+          )}`;
+
+          // Render text + download button if available
+          if (artifact.data.download_url) {
+            out.innerHTML = `
+              <pre>${text}</pre>
+              <button onclick="window.location.href='${artifact.data.download_url}'">
+                Download Model Artifact (.zip)
+              </button>
+            `;
+          } else {
+            out.textContent = text;
+          }
         } catch (err) {
           out.textContent = "Error: " + err.message;
         }
       }
 
       /* ----------------------------
-         RATE
+         RATE (re-use lastArtifactId)
          ---------------------------- */
       async function rateUrl() {
-        const url = document.getElementById("urlInput").value.trim();
         const out = document.getElementById("output");
-        if (!url) {
-          out.textContent = "Please enter a valid URL.";
+
+        if (!lastArtifactId) {
+          out.textContent =
+            "No artifact id known. Click Analyze first to ingest a model.";
           return;
         }
 
-        out.textContent = "Computing score...";
+        out.textContent = "Fetching score...";
 
         try {
-          const res = await fetch(`${API_BASE}/rate/${encodeURIComponent(url)}`);
+          const res = await fetch(
+            `${API_BASE}/artifact/model/${encodeURIComponent(
+              lastArtifactId
+            )}/rate`
+          );
 
           if (!res.ok) {
             const txt = await res.text();
@@ -246,13 +304,21 @@
 
           const data = await res.json();
 
-          let text = `Net Score: ${data.net}\nLatency: ${data.latency_ms} ms\n\nSub-scores:\n`;
-          for (const [key, value] of Object.entries(data.subs)) {
-            text += `- ${key}: ${JSON.stringify(value)}\n`;
+          let text = `Artifact ID: ${lastArtifactId}\n`;
+          text += `Net Score: ${data.net_score}\n\nSub-metrics:\n`;
+          for (const [k, v] of Object.entries(data)) {
+            if (k === "size_score" || k.endsWith("_latency")) continue;
+            if (["name", "category", "net_score"].includes(k)) continue;
+            text += `- ${k}: ${JSON.stringify(v)}\n`;
           }
 
-          out.textContent = text;
+          text += `\nSize Score:\n${JSON.stringify(
+            data.size_score,
+            null,
+            2
+          )}\n`;
 
+          out.textContent = text;
         } catch (err) {
           out.textContent = "Error: " + err.message;
         }
@@ -262,98 +328,68 @@
          Registry list + lineage
          ---------------------------- */
 
-      let cursor = null;
-      let currentQuery = "";
-
-      async function fetchModels(query = "", append = false) {
-        const params = new URLSearchParams({ limit: 10 });
-        if (query) params.append("q", query);
-        if (cursor) params.append("cursor", cursor);
-
-        const resp = await fetch(`${API_BASE}/models?${params.toString()}`);
-        if (!resp.ok) return;
-
-        const data = await resp.json();
+      async function fetchArtifacts(append = false) {
         const container = document.getElementById("models-container");
-
-        if (!append) container.innerHTML = "";
-
-        (data.items || []).forEach((model) => {
-          const div = document.createElement("div");
-          div.className = "model-card";
-          div.innerHTML = `
-            <strong>${model.name}</strong><br>
-            <small>${(model.metadata?.card || "").substring(0, 120) || "(no summary)"}</small>
-            <button class="lineage-btn" data-id="${model.id}">View Lineage</button>
-          `;
-          container.appendChild(div);
-        });
-
-        attachLineageHandlers();
-
-        cursor = data.next_cursor || null;
-        document.getElementById("load-more-btn").style.display = cursor
-          ? "inline-block"
-          : "none";
-      }
-
-      document.getElementById("search-btn").onclick = async function () {
-        const inputEl = document.getElementById("search-input");
-        const display = document.getElementById("model-list-display");
-
-        const id = (inputEl.value || "").trim();
-
-        display.innerHTML = "";
-
-        if (!id) {
-          display.textContent = "Please enter a model ID.";
-          return;
-        }
-
-        display.textContent = "Searching...";
+        const params = artifactsOffset ? `?offset=${encodeURIComponent(artifactsOffset)}` : "";
+        const body = [{ name: "*", types: ["model"] }];
 
         try {
-          const res = await fetch(`${API_BASE}/models/${encodeURIComponent(id)}`);
+          const resp = await fetch(`${API_BASE}/artifacts${params}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
 
-          if (res.status === 404) {
-            display.textContent = `Model not found: "${id}"`;
+          if (!resp.ok) return;
+
+          const data = await resp.json();
+
+          if (!append) container.innerHTML = "";
+
+          (data || []).forEach((m) => {
+            const div = document.createElement("div");
+            div.className = "model-card";
+            div.innerHTML = `
+              <strong>${m.name}</strong><br>
+              <small>ID: ${m.id}</small>
+              <button class="lineage-btn" data-id="${m.id}">View Lineage</button>
+            `;
+            container.appendChild(div);
+          });
+
+          attachLineageHandlers();
+
+          const next = resp.headers.get("offset");
+          artifactsOffset = next || "";
+          document.getElementById("load-more-btn").style.display = next
+            ? "inline-block"
+            : "none";
+        } catch (err) {
+          console.error(err);
+        }
+      }
+
+      document.getElementById("load-more-btn").addEventListener("click", () => {
+        fetchArtifacts(true);
+      });
+
+      document.getElementById("reset-btn").addEventListener("click", async () => {
+        if (!confirm("Reset registry?")) return;
+
+        try {
+          const res = await fetch(`${API_BASE}/reset`, { method: "DELETE" });
+          if (!res.ok) {
+            alert(`Error: ${res.status}`);
             return;
           }
-
-          const model = await res.json();
-          display.innerHTML = renderModelCard(model);
-
+          alert("Registry reset.");
+          document.getElementById("models-container").innerHTML = "";
+          artifactsOffset = "";
+          fetchArtifacts();
         } catch (err) {
-          display.textContent = "Unexpected error: " + err.message;
+          alert("Error: " + err.message);
         }
-      };
-
-      function renderModelCard(model) {
-        const name = escapeHtml(model.name || "(no name)");
-        const version = escapeHtml(model.version || "");
-        const url = model.url
-          ? `<a href="${escapeHtml(model.url)}" target="_blank">${escapeHtml(model.url)}</a>`
-          : "(no url)";
-
-        let metadataStr = "";
-        try {
-          metadataStr = JSON.stringify(model.metadata || model, null, 2);
-        } catch {
-          metadataStr = String(model.metadata || "");
-        }
-
-        return `
-          <div class="model-card" style="white-space:pre-wrap;">
-            <strong style="font-size:1.05rem">${name}</strong><br/>
-            <small>Version: ${version} • URL: ${url}</small>
-
-            <details style="margin-top:0.6rem;">
-              <summary>Show raw metadata</summary>
-              <pre>${escapeHtml(metadataStr)}</pre>
-            </details>
-          </div>
-        `;
-      }
+      });
 
       function attachLineageHandlers() {
         document.querySelectorAll(".lineage-btn").forEach((btn) => {
@@ -366,14 +402,17 @@
         box.textContent = "Loading lineage...";
 
         try {
-          const res = await fetch(`${API_BASE}/models/${modelId}/lineage`);
+          const res = await fetch(
+            `${API_BASE}/artifact/model/${encodeURIComponent(
+              modelId
+            )}/lineage`
+          );
           if (!res.ok) {
-            box.textContent = "Error loading lineage";
+            box.textContent = `Error loading lineage (${res.status})`;
             return;
           }
           const graph = await res.json();
           box.innerHTML = renderLineageTree(graph);
-
         } catch (err) {
           box.textContent = "Error: " + err.message;
         }
@@ -381,18 +420,23 @@
 
       function renderLineageTree(graph) {
         const nodes = {};
-        (graph.nodes || []).forEach((n) => (nodes[n.id] = n));
+        (graph.nodes || []).forEach((n) => (nodes[n.artifact_id] = n));
 
         const children = {};
         (graph.edges || []).forEach((e) => {
-          (children[e.parent] = children[e.parent] || []).push(e.child);
+          (children[e.from_node_artifact_id] =
+            children[e.from_node_artifact_id] || []).push(
+            e.to_node_artifact_id
+          );
         });
 
         function render(id, depth = 0, seen = new Set()) {
           if (!nodes[id] || seen.has(id)) return "";
           seen.add(id);
 
-          let html = `<div style="margin-left:${depth * 16}px">• ${nodes[id].name}</div>`;
+          let html = `<div style="margin-left:${depth * 16}px">• ${
+            nodes[id].name
+          } (${id})</div>`;
 
           (children[id] || []).forEach((child) => {
             html += render(child, depth + 1, seen);
@@ -401,7 +445,11 @@
           return html;
         }
 
-        return render(graph.root_id);
+        // root = artifact requested; safe enough
+        const rootId =
+          (graph.nodes && graph.nodes.length && graph.nodes[0].artifact_id) ||
+          "";
+        return rootId ? render(rootId) : "(no lineage)";
       }
 
       function escapeHtml(s) {
@@ -413,103 +461,144 @@
           .replaceAll("'", "&#39;");
       }
 
-      document.getElementById("load-more-btn").addEventListener("click", () => {
-        fetchModels(currentQuery, true);
-      });
-
-      document.getElementById("reset-btn").addEventListener("click", async () => {
-        if (!confirm("Reset registry?")) return;
-
-        try {
-          await fetch(`${API_BASE}/reset`, { method: "DELETE" });
-          alert("Registry reset.");
-          document.getElementById("models-container").innerHTML = "";
-          cursor = null;
-          fetchModels();
-        } catch (err) {
-          alert("Error: " + err.message);
-        }
-      });
-
-      fetchModels();
-    </script>
-
-    <script>
-      // list models button
-      document.getElementById("list-models-btn").addEventListener("click", async () => {
+      /* ----------------------------------
+         Search + list-models button
+         ---------------------------------- */
+      document.getElementById("search-btn").onclick = async function () {
+        const inputEl = document.getElementById("search-input");
         const display = document.getElementById("model-list-display");
-        display.textContent = "Loading...";
+        const id = (inputEl.value || "").trim();
 
-        try {
-          const response = await fetch(`${API_BASE}/models?limit=100`);
-          const page = await response.json();
-          const models = page.items || [];
+        display.innerHTML = "";
 
-          let output = "Registered Models:\n\n";
-          models.forEach((m, i) => {
-            output += `${i + 1}. ${m.name}\n`;
-          });
-
-          display.textContent = output;
-
-        } catch (err) {
-          display.textContent = "Error: " + err.message;
-        }
-      });
-
-      // license check handler
-      document.getElementById("license-check-btn").addEventListener("click", async () => {
-        const modelId = document.getElementById("license-model-input").value.trim();
-        const repoUrl = document.getElementById("license-github-input").value.trim();
-        const output = document.getElementById("license-check-result");
-
-        output.innerHTML = "";
-
-        if (!modelId || !repoUrl) {
-          output.innerHTML = "<p style='color:red; font-weight:bold;'>❗ Enter both a Model ID and a GitHub URL.</p>";
+        if (!id) {
+          display.textContent = "Please enter an artifact ID.";
           return;
         }
 
-        output.innerHTML = "Checking license compatibility...";
+        display.textContent = "Searching...";
 
         try {
-          const response = await fetch(`${API_BASE}/models/${encodeURIComponent(modelId)}/license-check`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ github_url: repoUrl })
-          });
+          const res = await fetch(
+            `${API_BASE}/artifact/model/${encodeURIComponent(id)}`
+          );
 
-          let data;
-          try {
-            data = await response.json();
-          } catch {
-            data = {};
-          }
-
-          if (!response.ok) {
-            output.innerHTML = `
-              <p style='color:red; font-weight:bold;'>❌ Error ${response.status}</p>
-              <p>${data.detail ?? "Unexpected server error."}</p>
-            `;
+          if (res.status === 404) {
+            display.textContent = `Artifact not found: "${id}"`;
             return;
           }
 
-          output.innerHTML = `
-            <strong>Model:</strong> ${data.model_id}<br>
-            <strong>Model License:</strong> ${data.model_license}<br>
-            <strong>GitHub License:</strong> ${data.github_license}<br>
-            <strong>Compatible:</strong> ${data.compatible ? "✅ Yes" : "❌ No"}<br><br>
-            <strong>Reason:</strong> ${data.reason}
-          `;
+          if (!res.ok) {
+            display.textContent = `Error: ${res.status}`;
+            return;
+          }
 
+          const artifact = await res.json();
+          display.textContent = JSON.stringify(artifact, null, 2);
         } catch (err) {
-          output.innerHTML = `
-            <p style='color:red; font-weight:bold;'>❌ Network error</p>
-            <p>${err.message}</p>
-          `;
+          display.textContent = "Unexpected error: " + err.message;
         }
-      });
-    </script>
+      };
 
+      document
+        .getElementById("list-models-btn")
+        .addEventListener("click", async () => {
+          const display = document.getElementById("model-list-display");
+          display.textContent = "Loading...";
+
+          try {
+            const res = await fetch(`${API_BASE}/artifacts`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify([{ name: "*", types: ["model"] }]),
+            });
+
+            if (!res.ok) {
+              display.textContent = `Error: ${res.status}`;
+              return;
+            }
+
+            const items = await res.json();
+            let output = "Registered Model Artifacts:\n\n";
+            (items || []).forEach((m, i) => {
+              output += `${i + 1}. ${m.name} (id=${m.id})\n`;
+            });
+
+            display.textContent = output;
+          } catch (err) {
+            display.textContent = "Error: " + err.message;
+          }
+        });
+
+      // license check handler (uses spec endpoint)
+      document
+        .getElementById("license-check-btn")
+        .addEventListener("click", async () => {
+          const modelIdRaw =
+            document.getElementById("license-model-input").value.trim();
+          const repoUrl = document
+            .getElementById("license-github-input")
+            .value.trim();
+          const output = document.getElementById("license-check-result");
+
+          output.innerHTML = "";
+
+          const artifactId =
+            modelIdRaw || lastArtifactId || "".trim();
+
+          if (!artifactId || !repoUrl) {
+            output.innerHTML =
+              "<p style='color:red; font-weight:bold;'>❗ Need an artifact id (or click Analyze first) and a GitHub URL.</p>";
+            return;
+          }
+
+          output.innerHTML = "Checking license compatibility...";
+
+          try {
+            const response = await fetch(
+              `${API_BASE}/artifact/model/${encodeURIComponent(
+                artifactId
+              )}/license-check`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ github_url: repoUrl }),
+              }
+            );
+
+            let data;
+            try {
+              data = await response.json();
+            } catch {
+              data = null;
+            }
+
+            if (!response.ok) {
+              output.innerHTML = `
+                <p style='color:red; font-weight:bold;'>❌ Error ${response.status}</p>
+                <p>${(data && data.detail) || "Unexpected server error."}</p>
+              `;
+              return;
+            }
+
+            const compatible = !!data;
+            output.innerHTML = `
+              <strong>Artifact ID:</strong> ${artifactId}<br>
+              <strong>GitHub URL:</strong> ${repoUrl}<br>
+              <strong>Compatible (fine-tune + inference):</strong> ${
+                compatible ? "✅ Yes" : "❌ No"
+              }
+            `;
+          } catch (err) {
+            output.innerHTML = `
+              <p style='color:red; font-weight:bold;'>❌ Network error</p>
+              <p>${err.message}</p>
+            `;
+          }
+        });
+
+      // initial load
+      fetchArtifacts();
+    </script>
   </body>
 </html>
