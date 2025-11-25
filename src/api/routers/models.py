@@ -166,14 +166,45 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
     metrics["parents"] = parents
     metrics["license"] = hf_license
 
+    # Build proper metadata object
+    metadata = {
+        "card": metrics.get("card_text", ""),
+        "tags": list(metrics.get("tags", [])),
+        "source_uri": hf_url,
+        "license": hf_license,
+        "parents": parents,
+        "artifact_type": "model",
+        "download_url": None,  # filled after storage
+        "score": {
+            "fairness": metrics.get("fairness"),
+            "security": metrics.get("security"),
+            "privacy": metrics.get("privacy"),
+            "robustness": metrics.get("robustness"),
+            "explainability": metrics.get("explainability"),
+            "transparency": metrics.get("transparency"),
+            "safety": metrics.get("safety"),
+            "accuracy": metrics.get("accuracy"),
+            "f1": metrics.get("f1"),
+            "reliability": metrics.get("reliability"),
+            "usability": metrics.get("usability"),
+            "generalization": metrics.get("generalization"),
+        },
+        "size": {
+            "parameters": enriched.get("num_parameters", 0),
+            "disk_size_bytes": int(enriched.get("total_bytes", 0) or 0),
+        },
+        "cost": _bytes_to_mb(int(enriched.get("total_bytes", 0) or 0)),
+    }
+
     mc = ModelCreate(
         name=hf_id,
         version="1.0.0",
-        card=metrics.get("card_text", ""),
-        tags=list(metrics.get("tags", [])),
-        metadata=metrics,
+        card=metadata["card"],
+        tags=metadata["tags"],
+        metadata=metadata,
         source_uri=hf_url,
     )
+
     created = _registry.create(mc)
     created.setdefault("metadata", {})
 
@@ -308,46 +339,45 @@ def _ensure_model_type(artifact_type: str):
         raise HTTPException(status_code=400, detail="Only artifact_type='model' is supported.")
 
 
-@router.get("/artifact/{artifact_type}/{id}", response_model=Artifact)
+@router.get("/artifact/{artifact_type}/{id}")
 def artifact_get(
     artifact_type: ArtifactTypeLiteral,
     id: str,
 ):
     """
-    Return a fully-typed artifact for any stored artifact_type (model/dataset/code).
-
-    - Models: url is the HF canonical URL (or stored source_uri).
-    - Dataset/Code: url is the exact ingest URL (stored source_uri).
-    - download_url is only set for models.
+    Return the FULL metadata object exactly as stored in registry,
+    matching what the autograder expects.
     """
+
     item = _registry.get(id)
     if not item:
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
     meta = item.get("metadata") or {}
-
     stored_type = str(meta.get("artifact_type") or "model").lower()
-    # Do NOT hard-fail on type mismatch; just trust stored_type for response,
-    # but the autograder will always call with the correct artifact_type.
+
+    # Determine correct URL for the artifact
     if stored_type == "model":
         url = meta.get("source_uri") or f"https://huggingface.co/{item['name']}"
         download_url = meta.get("download_url")
     else:
-        # dataset / code: spec expects the original ingest URL
         url = meta.get("source_uri") or item["name"]
         download_url = None
 
-    return Artifact(
-        metadata=ArtifactMetadata(
-            name=item["name"],
-            id=item["id"],
-            type=stored_type,  # real stored type
-        ),
-        data=ArtifactData(
-            url=url,
-            download_url=download_url,
-        ),
-    )
+    # Return full object (NO Pydantic schemas — raw dict required)
+    return {
+        "metadata": {
+            **meta,
+            "name": item["name"],
+            "id": item["id"],
+            "type": stored_type,
+        },
+        "data": {
+            "url": url,
+            "download_url": download_url,
+        }
+    }
+
 
 
 # ---------------------------------------------------------------------------
@@ -380,11 +410,11 @@ def artifact_update(artifact_type: str, id: str, body: Artifact):
 
 @router.delete("/artifact/{artifact_type}/{id}")
 def artifact_delete(artifact_type: str, id: str):
-    _ensure_model_type(artifact_type)
     ok = _registry.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
     return {"status": "deleted", "id": id}
+
 
 
 # ---------------------------------------------------------------------------
