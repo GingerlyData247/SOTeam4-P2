@@ -68,13 +68,12 @@ class LicenseCheckInternalRequest(BaseModel):
     github_url: str
 
 
-# For compatibility mapping (simple but good enough)
 LICENSE_COMPATIBILITY: Dict[str, set] = {
     "apache-2.0": {"mit", "bsd-3-clause", "bsd-2-clause", "apache-2.0"},
     "mit": {"mit", "bsd-3-clause", "bsd-2-clause"},
     "bsd-3-clause": {"bsd-3-clause", "mit"},
     "bsd-2-clause": {"bsd-2-clause", "mit"},
-    "gpl-3.0": set(),  # treat GPLv3 as incompatible with everything for fine-tune+inference
+    "gpl-3.0": set(),
     "cc-by-4.0": set(),
 }
 
@@ -84,20 +83,10 @@ LICENSE_COMPATIBILITY: Dict[str, set] = {
 
 
 def _hf_id_from_url_or_id(s: str) -> str:
-    """
-    Accept either:
-      - plain HF ID: 'google-bert/bert-base-uncased'
-      - HF URL: 'https://huggingface.co/google-bert/bert-base-uncased'
-    and normalize to 'google-bert/bert-base-uncased'.
-    """
     return normalize_hf_id(s.strip())
 
 
 def _build_hf_resource(hf_id: str) -> Dict[str, Any]:
-    """
-    Use the ScoringService internal helper to build a rich resource
-    with config, dataset info, file sizes, etc.
-    """
     return _scoring._build_resource(hf_id)  # type: ignore[attr-defined]
 
 
@@ -132,36 +121,24 @@ def _fetch_hf_license(hf_id: str) -> str:
 
 
 def _bytes_to_mb(n: int) -> float:
-    # Simple MB conversion; precision not critical for spec
     return round(float(n) / 1_000_000.0, 3)
 
 
 # ---------------------------------------------------------------------------
-# Core ingest logic – this is your old /ingest but refactored as a helper.
-# It:
-#   * normalizes HF id
-#   * runs Phase 1 metrics via compute_metrics_for_model
-#   * enforces reviewedness >= 0.5
-#   * extracts lineage parents from config
-#   * stores an artifact ZIP to storage and presigns download_url
-#   * writes everything into the RegistryService
+# Core ingest logic
 # ---------------------------------------------------------------------------
-
 
 def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
     from botocore.exceptions import NoCredentialsError
 
-    # 1) Normalize HF id and canonical URL
     hf_id = _hf_id_from_url_or_id(source_url)
     hf_url = f"https://huggingface.co/{hf_id}"
 
-    # 2) HF license via API
     try:
         hf_license = _fetch_hf_license(hf_id)
     except Exception:
         hf_license = ""
 
-    # 3) Phase 1 scoring pipeline (exactly as your old /rate + /ingest)
     base_resource = {
         "name": hf_id,
         "url": hf_url,
@@ -173,26 +150,22 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
 
     metrics = compute_metrics_for_model(base_resource)
 
-    # 4) Gate on reviewedness >= 0.5 as before
     reviewedness = float(metrics.get("reviewedness", 0.0) or 0.0)
     if reviewedness < 0.5:
-        # Spec says 424 for "disqualified rating"
         raise HTTPException(
             status_code=424,
             detail=f"Ingest rejected: reviewedness={reviewedness:.2f} < 0.50",
         )
 
-    # 5) Lineage parents from enriched resource
     try:
-        enriched_resource = _build_hf_resource(hf_id)
-        parents = extract_parents_from_resource(enriched_resource)
+        enriched = _build_hf_resource(hf_id)
+        parents = extract_parents_from_resource(enriched)
     except Exception:
         parents = []
 
     metrics["parents"] = parents
     metrics["license"] = hf_license
 
-    # 6) Create registry entry (ModelCreate → RegistryService)
     mc = ModelCreate(
         name=hf_id,
         version="1.0.0",
@@ -202,11 +175,15 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
         source_uri=hf_url,
     )
     created = _registry.create(mc)
+    created.setdefault("metadata", {})
+
+    # ✅ ADD artifact_type FOR MODELS
+    created["metadata"]["artifact_type"] = "model"
+
     model_id = created["id"]
 
-    # 7) Create small ZIP (recording source URL) and store via Storage
     mem_zip = io.BytesIO()
-    with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
+    with zipfile.ZipFile(mem_zip, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("source_url.txt", hf_url)
 
     try:
@@ -214,20 +191,15 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
         _storage.put_bytes(key, mem_zip.getvalue())
         presigned = _storage.presign(key)
     except NoCredentialsError:
-        # Local mode without AWS credentials: just fake a local:// url
         presigned = f"local://download/artifacts/model/{model_id}.zip"
 
-    # 8) Attach download_url back into registry metadata
-    created.setdefault("metadata", {})
     created["metadata"]["download_url"] = presigned
-
     return created
 
 
 # ---------------------------------------------------------------------------
-# SPEC: GET /health  (baseline)
+# /health
 # ---------------------------------------------------------------------------
-
 
 @router.get("/health")
 def health():
@@ -238,11 +210,9 @@ def health():
     }
 
 
-
 # ---------------------------------------------------------------------------
-# SPEC: DELETE /reset  (baseline)
+# /reset
 # ---------------------------------------------------------------------------
-
 
 @router.delete("/reset", status_code=200)
 def reset_system():
@@ -254,31 +224,28 @@ def reset_system():
     return {"status": "registry reset"}
 
 
-
 # ---------------------------------------------------------------------------
-# SPEC: /tracks (baseline helper)
+# /tracks
 # ---------------------------------------------------------------------------
-
 
 @router.get("/tracks")
 def get_tracks():
     return {"plannedTracks": ["Performance track"]}
 
 
-
 # ---------------------------------------------------------------------------
-# SPEC: POST /artifact/{artifact_type}  (baseline ingest – this is “ingest”)
+# POST /artifact/{artifact_type}
 # ---------------------------------------------------------------------------
-
 
 @router.post("/artifact/{artifact_type}", response_model=Artifact, status_code=201)
 def artifact_create(
     artifact_type: ArtifactTypeLiteral = Path(..., description="Only 'model', 'dataset', and 'code' supported."),
     body: ArtifactData = Body(...),
 ):
-    # ------------------------------------------------------------
-    # MODEL INGEST (existing full logic)
-    # ------------------------------------------------------------
+
+    # -----------------------
+    # MODEL INGEST
+    # -----------------------
     if artifact_type == "model":
         created = _ingest_hf_core(body.url)
 
@@ -290,31 +257,33 @@ def artifact_create(
 
         data = ArtifactData(
             url=body.url,
-            download_url=created.get("metadata", {}).get("download_url"),
+            download_url=created["metadata"].get("download_url"),
         )
 
         return Artifact(metadata=meta, data=data)
 
-    # ------------------------------------------------------------
-    # NEW: DATASET / CODE INGEST STUBS (autograder baseline)
-    # ------------------------------------------------------------
+    # -----------------------
+    # DATASET / CODE INGEST
+    # -----------------------
     if artifact_type in ("dataset", "code"):
-        # Extract a simple name from the URL (autograder expects this).
         parsed = urlparse(body.url)
         path = parsed.path.rstrip("/")
         name = path.split("/")[-1] or artifact_type
 
-        # Create minimal registry entry (no scoring, no lineage, no download_url)
         mc = ModelCreate(
             name=name,
             version="1.0.0",
             card="",
             tags=[],
-            metadata={},            # no metrics for dataset/code
-            source_uri=body.url,    # autograder uses this on GET
+            metadata={},          # no metrics
+            source_uri=body.url,
         )
 
         created = _registry.create(mc)
+        created.setdefault("metadata", {})
+
+        # ✅ ADD artifact_type FOR DATASET/CODE
+        created["metadata"]["artifact_type"] = artifact_type
 
         meta = ArtifactMetadata(
             name=name,
@@ -324,22 +293,17 @@ def artifact_create(
 
         data = ArtifactData(
             url=body.url,
-            download_url=None,      # datasets/code do NOT get S3 download URLs
+            download_url=None,
         )
 
         return Artifact(metadata=meta, data=data)
 
-    # ------------------------------------------------------------
-    # UNSUPPORTED TYPE
-    # ------------------------------------------------------------
     raise HTTPException(status_code=400, detail="Unsupported artifact_type.")
 
 
-
 # ---------------------------------------------------------------------------
-# SPEC: GET/PUT/DELETE /artifact/{artifact_type}/{id}  (baseline for GET/PUT)
+# GET /artifact/{artifact_type}/{id}
 # ---------------------------------------------------------------------------
-
 
 def _ensure_model_type(artifact_type: str):
     if artifact_type != "model":
@@ -347,10 +311,7 @@ def _ensure_model_type(artifact_type: str):
 
 
 @router.get("/artifact/{artifact_type}/{id}", response_model=Artifact)
-def artifact_get(
-    artifact_type: ArtifactTypeLiteral,
-    id: str = Path(..., description="Artifact id"),
-):
+def artifact_get(artifact_type: ArtifactTypeLiteral, id: str):
     _ensure_model_type(artifact_type)
     item = _registry.get(id)
     if not item:
@@ -366,21 +327,15 @@ def artifact_get(
     )
 
 
-@router.put("/artifact/{artifact_type}/{id}", response_model=Artifact)
-def artifact_update(
-    artifact_type: ArtifactTypeLiteral,
-    id: str,
-    body: Artifact,
-):
-    """
-    Minimal baseline implementation:
+# ---------------------------------------------------------------------------
+# PUT /artifact/{artifact_type}/{id}
+# ---------------------------------------------------------------------------
 
-    - Name and id in the body must match the path.
-    - We update the stored source URL and leave metrics as-is.
-    """
+@router.put("/artifact/{artifact_type}/{id}", response_model=Artifact)
+def artifact_update(artifact_type: str, id: str, body: Artifact):
     _ensure_model_type(artifact_type)
 
-    if body.metadata.id != id or body.metadata.name != body.metadata.name:
+    if body.metadata.id != id:
         raise HTTPException(status_code=400, detail="Name/id mismatch in artifact update.")
 
     item = _registry.get(id)
@@ -390,21 +345,18 @@ def artifact_update(
     meta = item.setdefault("metadata", {})
     meta["source_uri"] = body.data.url
 
-    # keep download_url & metrics unchanged
     return Artifact(
         metadata=ArtifactMetadata(name=item["name"], id=item["id"], type="model"),
         data=ArtifactData(url=meta["source_uri"], download_url=meta.get("download_url")),
     )
 
 
+# ---------------------------------------------------------------------------
+# DELETE /artifact/{artifact_type}/{id}
+# ---------------------------------------------------------------------------
+
 @router.delete("/artifact/{artifact_type}/{id}")
-def artifact_delete(
-    artifact_type: ArtifactTypeLiteral,
-    id: str,
-):
-    """
-    Non-baseline but trivial: drop this artifact from the registry.
-    """
+def artifact_delete(artifact_type: str, id: str):
     _ensure_model_type(artifact_type)
     ok = _registry.delete(id)
     if not ok:
@@ -413,136 +365,84 @@ def artifact_delete(
 
 
 # ---------------------------------------------------------------------------
-# SPEC: POST /artifacts  (baseline listing)
+# POST /artifacts
 # ---------------------------------------------------------------------------
-
 
 @router.post("/artifacts", response_model=List[ArtifactMetadata])
 def artifacts_list(
     queries: List[ArtifactQuery],
     response: Response,
-    offset: Optional[str] = Query(
-        None,
-        description="String offset for pagination; we treat it as an integer index.",
-    ),
+    offset: Optional[str] = Query(None),
 ):
-    """
-    Artifact listing used heavily by the autograder.
 
-    - Supports name == "*" to enumerate all artifacts.
-    - Respects `types` filter (["model"], ["dataset"], ["code"], or combos).
-    - Returns only ArtifactMetadata objects (name, id, type).
-    - Uses a large page size so, in practice, all matching artifacts come back
-      in a single response (the spec allows pagination, but tests don't depend on it).
-    """
-
-    # Helper: derive artifact_type from registry entry
     def infer_type(entry: Dict[str, Any]) -> ArtifactTypeLiteral:
         meta = entry.get("metadata") or {}
         t = str(meta.get("artifact_type") or "").lower()
         if t in ("model", "dataset", "code"):
-            return t  # type: ignore[return-value]
-        # Older entries (Phase 1 models) won't have artifact_type; treat as model.
-        return "model"  # type: ignore[return-value]
+            return t  # type: ignore
+        return "model"  # fallback
 
-    # Effective query (autograder only uses first element)
     q = queries[0] if queries else ArtifactQuery(name="*", types=None)
 
-    # Base list from registry, preserving insertion order
-    all_items: List[Dict[str, Any]] = list(_registry._models)
+    all_items = list(_registry._models)
 
-    # 1) Name filter
     if q.name == "*" or not q.name:
         name_filtered = all_items
     else:
         name_filtered = [m for m in all_items if m.get("name") == q.name]
 
-    # 2) Types filter
     if q.types:
-        allowed_types = {t for t in q.types}
-        type_filtered = [
-            m for m in name_filtered
-            if infer_type(m) in allowed_types
-        ]
+        allowed = set(q.types)
+        type_filtered = [m for m in name_filtered if infer_type(m) in allowed]
     else:
-        # No type filter requested → return all types
         type_filtered = name_filtered
 
-    # 3) Pagination via offset (but with a large page size so we effectively
-    #    return all matches for the autograder's use cases).
     start = 0
     if offset:
         try:
             start = int(offset)
-        except ValueError:
+        except:
             start = 0
 
-    page_size = 1000  # large enough for all autograder artifacts
+    page_size = 1000
     slice_ = type_filtered[start : start + page_size]
     next_offset = start + page_size if (start + page_size) < len(type_filtered) else None
 
-    if next_offset is not None:
+    if next_offset:
         response.headers["offset"] = str(next_offset)
 
-    # 4) Shape the response as a list of ArtifactMetadata
     return [
-        ArtifactMetadata(
-            name=m["name"],
-            id=m["id"],
-            type=infer_type(m),
-        )
+        ArtifactMetadata(name=m["name"], id=m["id"], type=infer_type(m))
         for m in slice_
     ]
 
-    return output
-
-
 
 # ---------------------------------------------------------------------------
-# SPEC: POST /artifact/byRegEx  (baseline)
+# POST /artifact/byRegEx
 # ---------------------------------------------------------------------------
-
 
 @router.post("/artifact/byRegEx", response_model=List[ArtifactMetadata])
 def artifact_by_regex(body: ArtifactRegex):
-    """
-    Proxy to RegistryService.list(q=regex).
-    """
     page = _registry.list(q=body.regex, limit=100, cursor=None)
     items = page.get("items") or []
 
     if not items:
         raise HTTPException(status_code=404, detail="No artifact found under this regex.")
 
-    return [
-        ArtifactMetadata(name=m["name"], id=m["id"], type="model")
-        for m in items
-    ]
+    return [ArtifactMetadata(name=m["name"], id=m["id"], type="model") for m in items]
 
 
 # ---------------------------------------------------------------------------
-# SPEC: GET /artifact/model/{id}/rate  (baseline rating)
+# GET /artifact/model/{id}/rate
 # ---------------------------------------------------------------------------
-
 
 @router.get("/artifact/model/{id}")
 def artifact_model_get_stub(id: str):
-    """
-    Tiny convenience stub in case anything calls /artifact/model/{id} directly.
-    We just delegate to /artifact/model/{id}/rate so Swagger has something
-    to show in the docs. (Not in spec, but harmless.)
-    """
     return {"detail": "Use /artifact/model/{id}/rate for model ratings."}
 
 
 @router.get("/artifact/model/{id}/rate")
 def model_artifact_rate(id: str):
-    """
-    Use the Phase 1 metrics from ingest (stored in registry.metadata) and
-    adapt them to the ModelRating schema from the spec.
-
-    This keeps your old /rate outputs intact, just under the new path.
-    """
     item = _registry.get(id)
     if not item:
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
@@ -550,7 +450,8 @@ def model_artifact_rate(id: str):
     meta = item.get("metadata") or {}
 
     def g(name: str, alt: Optional[str] = None, default: float = 0.0) -> float:
-        for k in (name, alt) if alt else (name,):
+        keys = (name, alt) if alt else (name,)
+        for k in keys:
             if not k:
                 continue
             v = meta.get(k)
@@ -564,7 +465,6 @@ def model_artifact_rate(id: str):
     tree_score = g("tree_score", alt="treescore")
     tree_latency = g("tree_score_latency", alt="treescore_latency")
 
-    # Compose response matching ModelRating
     return {
         "name": meta.get("name") or item["name"],
         "category": meta.get("category", ""),
@@ -601,23 +501,17 @@ def model_artifact_rate(id: str):
 
 
 # ---------------------------------------------------------------------------
-# SPEC: GET /artifact/{artifact_type}/{id}/cost  (baseline)
+# GET /artifact/{artifact_type}/{id}/cost
 # ---------------------------------------------------------------------------
 
-
 @router.get("/artifact/{artifact_type}/{id}/cost")
-def artifact_cost(
-    artifact_type: ArtifactTypeLiteral,
-    id: str,
-    dependency: bool = Query(False),
-):
+def artifact_cost(artifact_type: str, id: str, dependency: bool = Query(False)):
     _ensure_model_type(artifact_type)
 
     item = _registry.get(id)
     if not item:
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
-    # Helper to compute standalone cost via HF file sizes
     def cost_for_id(artifact_id: str) -> float:
         m = _registry.get(artifact_id)
         if not m:
@@ -627,14 +521,13 @@ def artifact_cost(
             resource = _build_hf_resource(hf_id)
             total_bytes = int(resource.get("total_bytes", 0) or 0)
             return _bytes_to_mb(total_bytes)
-        except Exception:
+        except:
             return 0.0
 
     if not dependency:
         cost = cost_for_id(id)
         return {id: {"total_cost": cost}}
 
-    # With dependency = true, use lineage graph from registry
     try:
         graph = _registry.get_lineage_graph(id)
     except KeyError:
@@ -644,33 +537,28 @@ def artifact_cost(
     costs = {nid: cost_for_id(nid) for nid in all_ids}
     total_sum = sum(costs.values())
 
-    result: Dict[str, Dict[str, float]] = {}
+    result = {}
     for nid in all_ids:
-        standalone = costs[nid]
         if nid == id:
             result[nid] = {
-                "standalone_cost": standalone,
+                "standalone_cost": costs[nid],
                 "total_cost": total_sum,
             }
         else:
             result[nid] = {
-                "standalone_cost": standalone,
-                "total_cost": standalone,
+                "standalone_cost": costs[nid],
+                "total_cost": costs[nid],
             }
 
     return result
 
 
 # ---------------------------------------------------------------------------
-# SPEC: GET /artifact/model/{id}/lineage  (baseline)
+# GET /artifact/model/{id}/lineage
 # ---------------------------------------------------------------------------
-
 
 @router.get("/artifact/model/{id}/lineage")
 def artifact_lineage(id: str):
-    """
-    Adapt RegistryService.get_lineage_graph(..) to the spec's ArtifactLineageGraph.
-    """
     try:
         g = _registry.get_lineage_graph(id)
     except KeyError:
@@ -680,7 +568,7 @@ def artifact_lineage(id: str):
         {
             "artifact_id": n["id"],
             "name": n["name"],
-            "source": "config_json",  # provenance of parents
+            "source": "config_json",
             "metadata": {},
         }
         for n in g.get("nodes", [])
@@ -699,39 +587,31 @@ def artifact_lineage(id: str):
 
 
 # ---------------------------------------------------------------------------
-# SPEC: POST /artifact/model/{id}/license-check  (baseline)
+# POST /artifact/model/{id}/license-check
 # ---------------------------------------------------------------------------
-
 
 @router.post("/artifact/model/{id}/license-check")
 def artifact_license_check(id: str, body: SimpleLicenseCheckRequest):
-    """
-    Spec says this returns a BOOLEAN: is fine-tune+inference compatible?
-    Internally we still reuse your more detailed license logic.
-    """
     item = _registry.get(id)
     if not item:
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
     hf_id = item["name"]
 
-    # Model license from metadata, else via HF API
     meta = item.get("metadata") or {}
     model_license = str(meta.get("license") or "").lower()
     if not model_license:
         try:
             model_license = _fetch_hf_license(hf_id)
-        except Exception:
+        except:
             raise HTTPException(status_code=502, detail="Unable to fetch model license.")
 
-    # GitHub license
     try:
         owner, repo = _extract_repo_info(body.github_url)
         github_license = _fetch_github_license(owner, repo)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except Exception:
+    except:
         raise HTTPException(status_code=502, detail="Unable to fetch GitHub license.")
 
-    compatible = github_license in LICENSE_COMPATIBILITY.get(model_license, set())
-    return compatible
+    return github_license in LICENSE_COMPATIBILITY.get(model_license, set())
