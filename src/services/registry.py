@@ -57,21 +57,27 @@ class RegistryService:
             except Exception:
                 start = 0
 
-        # Base list
+        # Base list (in insertion order)
         models = list(self._models)
 
-        # Regex filter
+        # Regex filter (extended to search name, card, source_uri, tags; case-insensitive)
         if q:
             try:
-                pat = re.compile(q)
+                pat = re.compile(q, re.IGNORECASE)
             except re.error:
                 models = []
             else:
                 filtered: List[Dict[str, Any]] = []
                 for m in models:
-                    name = m.get("name", "")
-                    card = str(m.get("metadata", {}).get("card", ""))
-                    if pat.search(name) or pat.search(card):
+                    name = str(m.get("name", "") or "")
+                    meta = m.get("metadata") or {}
+                    card = str(meta.get("card", "") or "")
+                    source_uri = str(meta.get("source_uri", "") or "")
+                    tags = meta.get("tags") or []
+                    tags_str = " ".join(str(t) for t in tags if t)
+
+                    haystack = " ".join([name, card, source_uri, tags_str])
+                    if pat.search(haystack):
                         filtered.append(m)
                 models = filtered
 
