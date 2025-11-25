@@ -230,9 +230,14 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
 
 
 @router.get("/health")
-def health() -> Dict[str, Any]:
+def health():
     """
-    Simple heartbeat. Spec does not fix a schema, so we keep a small JSON.
+    Simple heartbeat. Spec does not dictate a strict schema, so keep a small JSON.
+
+    We expose:
+    - status: "ok"
+    - uptime_s: integer seconds since process start
+    - artifacts: count of registered artifacts (models in our in-memory registry)
     """
     return {
         "status": "ok",
@@ -246,17 +251,23 @@ def health() -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@router.delete("/reset")
-def reset() -> Dict[str, Any]:
+@router.delete("/reset", status_code=200)
+def reset_system():
     """
-    Reset registry + scoring caches. Autograder relies on this.
+    Reset the registry to a clean state.
+
+    Autograder expectations:
+    - No auth required (since you are not implementing access control track).
+    - After this, there should be zero artifacts visible via the /artifacts API.
     """
     _registry.reset()
     try:
-        _scoring.reset()  # type: ignore[attr-defined]
+        _scoring.reset()
     except Exception:
+        # ScoringService.reset is a no-op, but keep this defensive.
         pass
-    return {"status": "registry reset"}
+    # Empty JSON object is fine; spec only requires 200.
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -265,9 +276,10 @@ def reset() -> Dict[str, Any]:
 
 
 @router.get("/tracks")
-def get_tracks() -> Dict[str, List[str]]:
+def get_tracks():
     """
-    Return the list of tracks you plan to implement.
+    Track list for autograder. Since you're only doing the Performance track,
+    that's all we report.
     """
     return {"plannedTracks": ["Performance track"]}
 
