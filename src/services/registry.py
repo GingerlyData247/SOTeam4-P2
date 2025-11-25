@@ -1,4 +1,7 @@
+# src/services/registry.py
+
 from __future__ import annotations
+
 from typing import List, Dict, Any, Optional
 import uuid
 import re
@@ -18,15 +21,22 @@ class RegistryService:
     # CREATE
     # ------------------------------------------------------------------ #
     def create(self, m) -> Dict[str, Any]:
-        
-        # Start from user-provided metadata (if any), then ensure standard fields
+        """
+        Create a registry entry from a ModelCreate-like object.
+
+        - Start from user-provided metadata (if any)
+        - Ensure standard fields live inside metadata:
+            - card
+            - tags
+            - source_uri
+        """
         meta: Dict[str, Any] = dict(m.metadata) if m.metadata is not None else {}
 
-        # Preserve existing behavior: card/tags/source_uri always live inside metadata
+        # Ensure standard keys always exist
         meta.setdefault("card", getattr(m, "card", ""))
-        meta.setdefault("tags", getattr(m, "tags", []))
+        meta.setdefault("tags", list(getattr(m, "tags", [])))
         meta.setdefault("source_uri", getattr(m, "source_uri", None))
-        
+
         entry: Dict[str, Any] = {
             "id": str(uuid.uuid4()),
             "name": m.name,
@@ -48,6 +58,10 @@ class RegistryService:
         limit: int = 20,
         cursor: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """
+        List models/artifacts, optionally filtering by regex q over
+        `name` and metadata["card"], and using a simple numeric cursor.
+        """
 
         # Start index
         start = 0
@@ -76,7 +90,7 @@ class RegistryService:
                 models = filtered
 
         # Pagination
-        items = models[start:start + limit]
+        items = models[start : start + limit]
         next_cursor = (
             str(start + limit) if (start + limit) < len(models) else None
         )
@@ -115,7 +129,7 @@ class RegistryService:
 
     def count_models(self) -> int:
         return len(self._models)
-        
+
     # ------------------------------------------------------------------ #
     # LINEAGE GRAPH
     # ------------------------------------------------------------------ #
