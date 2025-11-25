@@ -5,7 +5,6 @@ from __future__ import annotations
 import io
 import time
 import zipfile
-import re
 from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
@@ -129,9 +128,8 @@ def _bytes_to_mb(n: int) -> float:
 # Core ingest logic
 # ---------------------------------------------------------------------------
 
-
 def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
-    from botocore.exceptions import NoCredentialsError  # noqa: F401  (used indirectly)
+    from botocore.exceptions import NoCredentialsError
 
     hf_id = _hf_id_from_url_or_id(source_url)
     hf_url = f"https://huggingface.co/{hf_id}"
@@ -152,7 +150,6 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
 
     metrics = compute_metrics_for_model(base_resource)
 
-    # quality gate: this is what may throw 424
     reviewedness = float(metrics.get("reviewedness", 0.0) or 0.0)
     if reviewedness < 0.5:
         raise HTTPException(
@@ -169,7 +166,6 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
 
     metrics["parents"] = parents
     metrics["license"] = hf_license
-    metrics.setdefault("source_uri", hf_url)
 
     mc = ModelCreate(
         name=hf_id,
@@ -181,7 +177,6 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
     )
     created = _registry.create(mc)
     created.setdefault("metadata", {})
-    created["metadata"].setdefault("source_uri", hf_url)
 
     # Mark artifact type for models
     created["metadata"]["artifact_type"] = "model"
@@ -209,7 +204,6 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
 # /health
 # ---------------------------------------------------------------------------
 
-
 @router.get("/health")
 def health():
     return {
@@ -222,7 +216,6 @@ def health():
 # ---------------------------------------------------------------------------
 # /reset
 # ---------------------------------------------------------------------------
-
 
 @router.delete("/reset", status_code=200)
 def reset_system():
@@ -238,7 +231,6 @@ def reset_system():
 # /tracks
 # ---------------------------------------------------------------------------
 
-
 @router.get("/tracks")
 def get_tracks():
     # You intentionally only advertise Performance track; autograder warns but doesn't grade this.
@@ -248,7 +240,6 @@ def get_tracks():
 # ---------------------------------------------------------------------------
 # POST /artifact/{artifact_type}
 # ---------------------------------------------------------------------------
-
 
 @router.post("/artifact/{artifact_type}", response_model=Artifact, status_code=201)
 def artifact_create(
@@ -288,13 +279,12 @@ def artifact_create(
             version="1.0.0",
             card="",
             tags=[],
-            metadata={"source_uri": body.url},
+            metadata={},  # no extra metrics
             source_uri=body.url,
         )
 
         created = _registry.create(mc)
         created.setdefault("metadata", {})
-        created["metadata"].setdefault("source_uri", body.url)
         created["metadata"]["artifact_type"] = artifact_type
 
         meta = ArtifactMetadata(
@@ -316,7 +306,6 @@ def artifact_create(
 # ---------------------------------------------------------------------------
 # GET /artifact/byName/{name}
 # ---------------------------------------------------------------------------
-
 
 @router.get("/artifact/byName/{name}", response_model=List[ArtifactMetadata])
 def artifact_by_name(name: str):
@@ -352,17 +341,15 @@ def artifact_by_name(name: str):
 
 
 # ---------------------------------------------------------------------------
-# GET /artifacts/{artifact_type}/{id}
-# (NOTE the plural "artifacts" to match the OpenAPI spec for read/delete)
+# GET /artifact/{artifact_type}/{id}
 # ---------------------------------------------------------------------------
-
 
 def _ensure_model_type(artifact_type: str):
     if artifact_type != "model":
         raise HTTPException(status_code=400, detail="Only artifact_type='model' is supported.")
 
 
-@router.get("/artifacts/{artifact_type}/{id}", response_model=Artifact)
+@router.get("/artifact/{artifact_type}/{id}", response_model=Artifact)
 def artifact_get(
     artifact_type: ArtifactTypeLiteral,
     id: str,
@@ -380,8 +367,8 @@ def artifact_get(
 
     meta = item.get("metadata") or {}
 
-    # Infer stored artifact type; if missing, fall back to stored path param
-    stored_type = str(meta.get("artifact_type") or artifact_type).lower()
+    # Infer stored artifact type; if missing, fall back to path param
+    stored_type = str(meta.get("artifact_type") or "").lower()
     if stored_type not in ("model", "dataset", "code"):
         stored_type = artifact_type
 
@@ -410,11 +397,10 @@ def artifact_get(
 
 
 # ---------------------------------------------------------------------------
-# PUT /artifacts/{artifact_type}/{id}
+# PUT /artifact/{artifact_type}/{id}
 # ---------------------------------------------------------------------------
 
-
-@router.put("/artifacts/{artifact_type}/{id}", response_model=Artifact)
+@router.put("/artifact/{artifact_type}/{id}", response_model=Artifact)
 def artifact_update(artifact_type: str, id: str, body: Artifact):
     # The spec allows all types, but our update semantics only really matter for models;
     # however, not restricting here avoids surprising 400s.
@@ -450,11 +436,10 @@ def artifact_update(artifact_type: str, id: str, body: Artifact):
 
 
 # ---------------------------------------------------------------------------
-# DELETE /artifacts/{artifact_type}/{id}
+# DELETE /artifact/{artifact_type}/{id}
 # ---------------------------------------------------------------------------
 
-
-@router.delete("/artifacts/{artifact_type}/{id}")
+@router.delete("/artifact/{artifact_type}/{id}")
 def artifact_delete(artifact_type: str, id: str):
     """
     Delete artifact by id, regardless of type (model/dataset/code).
@@ -469,7 +454,6 @@ def artifact_delete(artifact_type: str, id: str):
 # ---------------------------------------------------------------------------
 # POST /artifacts
 # ---------------------------------------------------------------------------
-
 
 @router.post("/artifacts", response_model=List[ArtifactMetadata])
 def artifacts_list(
@@ -524,65 +508,40 @@ def artifacts_list(
 # POST /artifact/byRegEx
 # ---------------------------------------------------------------------------
 
-
 @router.post("/artifact/byRegEx", response_model=List[ArtifactMetadata])
-def artifact_by_regex(body: ArtifactRegex = Body(...)):
+def artifact_by_regex(body: ArtifactRegex):
     """
-    SPEC + AUTOGRADER COMPLIANT IMPLEMENTATION
-    -----------------------------------------
-    - Perform case-insensitive regex search across:
-        name, card, source_uri, tags, and README text.
-    - Return ArtifactMetadata only.
-    - If invalid regex → 400
-    - If no matches → 404
-    - Preserve registry insertion order.
+    Search artifacts by regex over name and README/card.
+
+    Uses RegistryService.list(q=regex), which already applies a regex over
+    the name and metadata.card fields.
     """
+    page = _registry.list(q=body.regex, limit=100, cursor=None)
+    items = page.get("items") or []
 
-    regex = body.regex
-    if not isinstance(regex, str) or not regex:
-        raise HTTPException(status_code=400, detail="Invalid regex")
+    if not items:
+        raise HTTPException(status_code=404, detail="No artifact found under this regex.")
 
-    # Compile regex safely
-    try:
-        pat = re.compile(regex, re.IGNORECASE)
-    except re.error:
-        raise HTTPException(status_code=400, detail="Malformed regex")
-
-    results: List[ArtifactMetadata] = []
-    for entry in _registry._models:
+    def infer_type(entry: Dict[str, Any]) -> ArtifactTypeLiteral:
         meta = entry.get("metadata") or {}
-        haystack_parts = [
-            entry.get("name", ""),
-            meta.get("card", ""),
-            meta.get("source_uri", "") or "",
-            " ".join(meta.get("tags", []) or []),
-            meta.get("readme", "") or "",  # IMPORTANT for autograder
-        ]
-        haystack = " ".join(str(p) for p in haystack_parts if p)
+        t = str(meta.get("artifact_type") or "").lower()
+        if t in ("model", "dataset", "code"):
+            return t  # type: ignore[return-value]
+        return "model"  # type: ignore[return-value]
 
-        if pat.search(haystack):
-            t_raw = str(meta.get("artifact_type", "model")).lower()
-            if t_raw not in ("model", "dataset", "code"):
-                t_raw = "model"
-
-            results.append(
-                ArtifactMetadata(
-                    name=entry["name"],
-                    id=entry["id"],
-                    type=t_raw,  # type: ignore[arg-type]
-                )
-            )
-
-    if not results:
-        raise HTTPException(status_code=404, detail="No artifacts match regex")
-
-    return results
+    return [
+        ArtifactMetadata(
+            name=m["name"],
+            id=m["id"],
+            type=infer_type(m),
+        )
+        for m in items
+    ]
 
 
 # ---------------------------------------------------------------------------
 # GET /artifact/model/{id}/rate
 # ---------------------------------------------------------------------------
-
 
 @router.get("/artifact/model/{id}")
 def artifact_model_get_stub(id: str):
@@ -652,7 +611,6 @@ def model_artifact_rate(id: str):
 # GET /artifact/{artifact_type}/{id}/cost
 # ---------------------------------------------------------------------------
 
-
 @router.get("/artifact/{artifact_type}/{id}/cost")
 def artifact_cost(artifact_type: str, id: str, dependency: bool = Query(False)):
     # Cost is only meaningful for models based on HF resources
@@ -707,7 +665,6 @@ def artifact_cost(artifact_type: str, id: str, dependency: bool = Query(False)):
 # GET /artifact/model/{id}/lineage
 # ---------------------------------------------------------------------------
 
-
 @router.get("/artifact/model/{id}/lineage")
 def artifact_lineage(id: str):
     try:
@@ -740,7 +697,6 @@ def artifact_lineage(id: str):
 # ---------------------------------------------------------------------------
 # POST /artifact/model/{id}/license-check
 # ---------------------------------------------------------------------------
-
 
 @router.post("/artifact/model/{id}/license-check")
 def artifact_license_check(id: str, body: SimpleLicenseCheckRequest):
