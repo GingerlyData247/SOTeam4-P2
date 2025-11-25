@@ -231,19 +231,12 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
 
 @router.get("/health")
 def health():
-    """
-    Simple heartbeat. Spec does not dictate a strict schema, so keep a small JSON.
-
-    We expose:
-    - status: "ok"
-    - uptime_s: integer seconds since process start
-    - artifacts: count of registered artifacts (models in our in-memory registry)
-    """
     return {
         "status": "ok",
         "uptime_s": int(time.time() - _START_TIME),
-        "artifacts": _registry.count_models(),
+        "models": _registry.count_models(),
     }
+
 
 
 # ---------------------------------------------------------------------------
@@ -253,21 +246,13 @@ def health():
 
 @router.delete("/reset", status_code=200)
 def reset_system():
-    """
-    Reset the registry to a clean state.
-
-    Autograder expectations:
-    - No auth required (since you are not implementing access control track).
-    - After this, there should be zero artifacts visible via the /artifacts API.
-    """
     _registry.reset()
     try:
         _scoring.reset()
     except Exception:
-        # ScoringService.reset is a no-op, but keep this defensive.
         pass
-    # Empty JSON object is fine; spec only requires 200.
-    return {}
+    return {"status": "registry reset"}
+
 
 
 # ---------------------------------------------------------------------------
@@ -277,11 +262,8 @@ def reset_system():
 
 @router.get("/tracks")
 def get_tracks():
-    """
-    Track list for autograder. Since you're only doing the Performance track,
-    that's all we report.
-    """
     return {"plannedTracks": ["Performance track"]}
+
 
 
 # ---------------------------------------------------------------------------
