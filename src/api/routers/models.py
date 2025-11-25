@@ -311,20 +311,26 @@ def _ensure_model_type(artifact_type: str):
 
 
 @router.get("/artifact/{artifact_type}/{id}", response_model=Artifact)
-def artifact_get(artifact_type: ArtifactTypeLiteral, id: str):
-    _ensure_model_type(artifact_type)
+def artifact_get(
+    artifact_type: ArtifactTypeLiteral,
+    id: str,
+):
     item = _registry.get(id)
     if not item:
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
     meta = item.get("metadata") or {}
-    source_uri = meta.get("source_uri") or f"https://huggingface.co/{item['name']}"
+    source_uri = meta.get("source_uri") or item["name"]
     download_url = meta.get("download_url")
 
+    # Return the exact type this artifact was stored with
+    t = str(meta.get("artifact_type") or "model").lower()
+
     return Artifact(
-        metadata=ArtifactMetadata(name=item["name"], id=item["id"], type="model"),
+        metadata=ArtifactMetadata(name=item["name"], id=item["id"], type=t),
         data=ArtifactData(url=source_uri, download_url=download_url),
     )
+
 
 
 # ---------------------------------------------------------------------------
@@ -429,7 +435,23 @@ def artifact_by_regex(body: ArtifactRegex):
     if not items:
         raise HTTPException(status_code=404, detail="No artifact found under this regex.")
 
-    return [ArtifactMetadata(name=m["name"], id=m["id"], type="model") for m in items]
+    # Reuse infer_type logic
+    def infer_type(entry: Dict[str, Any]) -> ArtifactTypeLiteral:
+        meta = entry.get("metadata") or {}
+        t = str(meta.get("artifact_type") or "").lower()
+        if t in ("model", "dataset", "code"):
+            return t  # correct type
+        return "model"  # fallback for HF models
+
+    return [
+        ArtifactMetadata(
+            name=m["name"],
+            id=m["id"],
+            type=infer_type(m)
+        )
+        for m in items
+    ]
+
 
 
 # ---------------------------------------------------------------------------
