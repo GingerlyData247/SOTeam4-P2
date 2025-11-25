@@ -427,43 +427,50 @@ def artifacts_list(
     ),
 ):
     """
-    Implementation notes:
-
-    - We support name == "*" to enumerate all artifacts.
-    - We only have models; 'types' filter is ignored except for 'model'.
-    - We paginate by simple start-index offset.
+    FULL FIX:
+    - returns ALL artifacts: model, dataset, code
+    - respects types filter (["model"], ["dataset"], ["code"])
+    - respects name filter
+    - supports pagination via offset
     """
-    start = 0
-    if offset:
-        try:
-            start = int(offset)
-        except ValueError:
-            start = 0
 
-    # Only first query is honored (sufficient for baseline)
-    q = queries[0] if queries else ArtifactQuery(name="*", types=["model"])
+    # pull EVERYTHING from registry
+    all_items: List[Dict[str, Any]] = list(_registry._models)
 
-    all_items: List[Dict[str, Any]] = list(_registry._models)  # simple in-memory registry
-    filtered: List[Dict[str, Any]] = []
+    # figure out query
+    q = queries[0] if queries else ArtifactQuery(name="*", types=None)
+    name_filter = q.name
+    type_filter = q.types  # may be None
 
-    if q.name == "*":
+    # filter by name
+    if name_filter == "*":
         filtered = all_items
     else:
-        for m in all_items:
-            if m.get("name") == q.name:
-                filtered.append(m)
+        filtered = [m for m in all_items if m.get("name") == name_filter]
 
+    # filter by type if provided
+    if type_filter:
+        type_set = set(type_filter)
+        filtered = [m for m in filtered if m.get("type") in type_set]
+
+    # --- pagination ---
+    start = int(offset) if offset and offset.isdigit() else 0
     page_size = 20
+
     slice_ = filtered[start : start + page_size]
     next_offset = start + page_size if (start + page_size) < len(filtered) else None
 
     if next_offset is not None:
         response.headers["offset"] = str(next_offset)
 
-    return [
-        ArtifactMetadata(name=m["name"], id=m["id"], type="model")
+    # convert to output format
+    output = [
+        ArtifactMetadata(name=m["name"], id=m["id"], type=m.get("type", "model"))
         for m in slice_
     ]
+
+    return output
+
 
 
 # ---------------------------------------------------------------------------
