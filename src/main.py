@@ -42,7 +42,7 @@ app.add_middleware(
 #   /api/ingest
 #   /api/health
 #   /api/tracks
-app.include_router(models_router) #, prefix="/api")
+app.include_router(models_router, prefix="/api")
 
 # Mount S3 routes (these already include their own /api/s3 prefix)
 app.include_router(s3_router)
@@ -50,7 +50,7 @@ app.include_router(s3_router)
 # -------------------------------------------------------------
 # Environment debugging endpoint
 # -------------------------------------------------------------
-@app.get("/env")
+@app.get("/api/env")
 def get_env_values():
     return {
         "S3_BUCKET": os.getenv("S3_BUCKET"),
