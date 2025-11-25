@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import io
 import time
 import zipfile
@@ -21,6 +22,8 @@ from src.run import compute_metrics_for_model
 from src.utils.hf_normalize import normalize_hf_id
 
 _START_TIME = time.time()
+
+REGEX_TIMEOUT_SEC = 2.0
 
 router = APIRouter()
 
@@ -486,42 +489,45 @@ def artifacts_list(
 # ---------------------------------------------------------------------------
 
 @router.post("/artifact/byRegEx", response_model=List[ArtifactMetadata])
-def artifact_by_regex(body: ArtifactRegex = Body(...)):
-    """
-    SPEC + AUTOGRADER COMPLIANT IMPLEMENTATION
-    -----------------------------------------
-    - Perform case-insensitive regex search across:
-        name, card, source_uri, tags, and README text.
-    - Return ArtifactMetadata only.
-    - If invalid regex → 400
-    - If no matches → 404
-    - Preserve registry insertion order.
-    """
+def artifact_by_regex(body: ArtifactRegex):
 
     regex = body.regex
     if not isinstance(regex, str) or not regex:
         raise HTTPException(status_code=400, detail="Invalid regex")
 
-    # Compile regex safely
+    # Try compiling using standard re
     try:
         pat = re.compile(regex, re.IGNORECASE)
     except re.error:
+        # syntactically invalid → 400
         raise HTTPException(status_code=400, detail="Malformed regex")
 
     results = []
-    for entry in _registry._models:
 
+    for entry in _registry._models:
         meta = entry.get("metadata") or {}
-        haystack_parts = [
+
+        haystack = " ".join([
             entry.get("name", ""),
-            meta.get("card", ""),
+            meta.get("card", "") or "",
             meta.get("source_uri", "") or "",
             " ".join(meta.get("tags", []) or []),
-            meta.get("readme", "") or "",    # IMPORTANT for autograder
-        ]
-        haystack = " ".join(str(p) for p in haystack_parts if p)
+            meta.get("readme", "") or "",
+        ])
 
-        if pat.search(haystack):
+        # Catastrophic backtracking timeout detection
+        start = time.time()
+        try:
+            matched = pat.search(haystack)
+        except Exception:
+            # Anything suspicious → treat like invalid regex
+            raise HTTPException(status_code=400, detail="Invalid regex")
+
+        if (time.time() - start) > REGEX_TIMEOUT_SEC:
+            # MUST return 400 per Piazza
+            raise HTTPException(status_code=400, detail="Regex too slow")
+
+        if matched:
             results.append(
                 ArtifactMetadata(
                     name=entry["name"],
