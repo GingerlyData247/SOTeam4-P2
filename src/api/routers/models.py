@@ -524,33 +524,47 @@ def artifacts_list(
 
 @router.post("/artifact/byRegEx", response_model=List[ArtifactMetadata])
 def artifact_by_regex(body: ArtifactRegex):
-    """
-    Search artifacts by regex over name and README/card.
+    import re
 
-    Uses RegistryService.list(q=regex), which already applies a regex over
-    the name and metadata.card fields.
-    """
-    page = _registry.list(q=body.regex, limit=100, cursor=None)
-    items = page.get("items") or []
+    pattern = re.compile(body.regex, re.IGNORECASE)
 
-    if not items:
+    # Scan all stored artifacts
+    all_items = list(_registry._models)
+
+    def matches(entry: Dict[str, Any]) -> bool:
+        name = entry.get("name", "")
+        meta = entry.get("metadata") or {}
+        card = meta.get("card", "") or meta.get("card_text", "") or ""
+        return bool(pattern.search(name) or pattern.search(card))
+
+    filtered = [m for m in all_items if matches(m)]
+
+    if not filtered:
         raise HTTPException(status_code=404, detail="No artifact found under this regex.")
 
-    def infer_type(entry: Dict[str, Any]) -> ArtifactTypeLiteral:
+    # Must sort by numeric ID if possible
+    def sort_key(entry):
+        try:
+            return int(entry["id"])
+        except:
+            return entry["id"]
+
+    filtered_sorted = sorted(filtered, key=sort_key)
+
+    def infer_type(entry: Dict[str, Any]):
         meta = entry.get("metadata") or {}
         t = str(meta.get("artifact_type") or "").lower()
-        if t in ("model", "dataset", "code"):
-            return t  # type: ignore[return-value]
-        return "model"  # type: ignore[return-value]
+        return t if t in ("model", "dataset", "code") else "model"
 
     return [
         ArtifactMetadata(
             name=m["name"],
             id=m["id"],
-            type=infer_type(m),
+            type=infer_type(m)
         )
-        for m in items
+        for m in filtered_sorted
     ]
+
 
 
 # ---------------------------------------------------------------------------
