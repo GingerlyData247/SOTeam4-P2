@@ -353,7 +353,6 @@ def artifact_by_name(name: str):
     ]
 
 
-
 # ---------------------------------------------------------------------------
 # GET /artifact/{artifact_type}/{id}
 # ---------------------------------------------------------------------------
@@ -524,47 +523,57 @@ def artifacts_list(
 
 @router.post("/artifact/byRegEx", response_model=List[ArtifactMetadata])
 def artifact_by_regex(body: ArtifactRegex):
+    """
+    Search artifacts by regex over name and README/card.
+
+    Baseline behavior:
+    - Apply regex over artifact name and metadata.card
+    - Return results sorted by ID ascending
+    - If no artifacts match, return 200 with an empty list
+    - If the regex is invalid, return 400
+    """
     import re
 
-    pattern = re.compile(body.regex, re.IGNORECASE)
+    try:
+        pattern = re.compile(body.regex)
+    except re.error:
+        raise HTTPException(status_code=400, detail="Invalid regular expression.")
 
-    # Scan all stored artifacts
     all_items = list(_registry._models)
 
-    def matches(entry: Dict[str, Any]) -> bool:
-        name = entry.get("name", "")
-        meta = entry.get("metadata") or {}
-        card = meta.get("card", "") or meta.get("card_text", "") or ""
-        return bool(pattern.search(name) or pattern.search(card))
-
-    filtered = [m for m in all_items if matches(m)]
-
-    if not filtered:
-        raise HTTPException(status_code=404, detail="No artifact found under this regex.")
-
-    # Must sort by numeric ID if possible
-    def sort_key(entry):
-        try:
-            return int(entry["id"])
-        except:
-            return entry["id"]
-
-    filtered_sorted = sorted(filtered, key=sort_key)
-
-    def infer_type(entry: Dict[str, Any]):
+    def infer_type(entry: Dict[str, Any]) -> ArtifactTypeLiteral:
         meta = entry.get("metadata") or {}
         t = str(meta.get("artifact_type") or "").lower()
-        return t if t in ("model", "dataset", "code") else "model"
+        if t in ("model", "dataset", "code"):
+            return t  # type: ignore[return-value]
+        return "model"  # type: ignore[return-value]
+
+    matches: List[Dict[str, Any]] = []
+    for m in all_items:
+        name = m.get("name", "") or ""
+        meta = m.get("metadata") or {}
+        card = str(meta.get("card", "") or "")
+        if pattern.search(name) or pattern.search(card):
+            matches.append(m)
+
+    # Sort deterministically by "ascending ID"
+    def sort_key(entry: Dict[str, Any]):
+        id_val = entry.get("id", "")
+        try:
+            return int(id_val)
+        except (TypeError, ValueError):
+            return str(id_val)
+
+    matches_sorted = sorted(matches, key=sort_key)
 
     return [
         ArtifactMetadata(
             name=m["name"],
             id=m["id"],
-            type=infer_type(m)
+            type=infer_type(m),
         )
-        for m in filtered_sorted
+        for m in matches_sorted
     ]
-
 
 
 # ---------------------------------------------------------------------------
