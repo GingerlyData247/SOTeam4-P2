@@ -202,7 +202,7 @@ def get_tracks():
     return {"plannedTracks": ["Performance track"]}
 
 # =======================================================================
-# 🔥 STATIC ROUTES FIRST — critical fix (regex, byName, model/*)
+# STATIC ROUTES FIRST
 # =======================================================================
 
 # -----------------------
@@ -272,12 +272,8 @@ def artifact_by_name(name: str):
     ]
 
 # -----------------------
-# model/* static routes
+# GET /artifact/model/{id}/rate
 # -----------------------
-@router.get("/artifact/model/{id}")
-def artifact_model_get_stub(id: str):
-    return {"detail": "Use /artifact/model/{id}/rate for model ratings."}
-
 @router.get("/artifact/model/{id}/rate")
 def model_artifact_rate(id: str):
     item = _registry.get(id)
@@ -332,6 +328,9 @@ def model_artifact_rate(id: str):
         "size_score_latency": size_latency,
     }
 
+# -----------------------
+# GET /artifact/model/{id}/lineage
+# -----------------------
 @router.get("/artifact/model/{id}/lineage")
 def artifact_lineage(id: str):
     try:
@@ -360,6 +359,9 @@ def artifact_lineage(id: str):
 
     return {"nodes": nodes_out, "edges": edges_out}
 
+# -----------------------
+# POST /artifact/model/{id}/license-check
+# -----------------------
 @router.post("/artifact/model/{id}/license-check")
 def artifact_license_check(id: str, body: SimpleLicenseCheckRequest):
     item = _registry.get(id)
@@ -386,8 +388,15 @@ def artifact_license_check(id: str, body: SimpleLicenseCheckRequest):
 
     return github_license in LICENSE_COMPATIBILITY.get(model_license, set())
 
+# -----------------------
+# FIXED: GET /artifact/model/{id} (after rate + returns 404)
+# -----------------------
+@router.get("/artifact/model/{id}")
+def artifact_model_get_stub(id: str):
+    raise HTTPException(status_code=404, detail="Not found.")
+
 # =======================================================================
-# 🚨 PARAMETERIZED ROUTES COME LAST (critical ordering)
+# PARAMETERIZED ROUTES (MUST COME LAST)
 # =======================================================================
 
 @router.post("/artifact/{artifact_type}", response_model=Artifact, status_code=201)
