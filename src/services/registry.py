@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import List, Dict, Any, Optional
-import uuid
+import uuid  # keeping import even though UUID is no longer used, harmless
 import re
 
 
@@ -17,19 +17,19 @@ class RegistryService:
         self._order: List[str] = []
         self._cursor_map: Dict[str, int] = {}
 
+        # ------------------------------------------------------------
+        # FIX: Autoincrement ID counter
+        # ------------------------------------------------------------
+        self._id_counter: int = 0
+
     # ------------------------------------------------------------------ #
     # CREATE
     # ------------------------------------------------------------------ #
     def create(self, m) -> Dict[str, Any]:
         """
         Create a registry entry from a ModelCreate-like object.
-
-        - Start from user-provided metadata (if any)
-        - Ensure standard fields live inside metadata:
-            - card
-            - tags
-            - source_uri
         """
+
         meta: Dict[str, Any] = dict(m.metadata) if m.metadata is not None else {}
 
         # Ensure standard keys always exist
@@ -37,16 +37,22 @@ class RegistryService:
         meta.setdefault("tags", list(getattr(m, "tags", [])))
         meta.setdefault("source_uri", getattr(m, "source_uri", None))
 
+        # ------------------------------------------------------------
+        # FIX: Use incrementing integer string IDs instead of UUIDs
+        # ------------------------------------------------------------
+        self._id_counter += 1
+        new_id = str(self._id_counter)
+
         entry: Dict[str, Any] = {
-            "id": str(uuid.uuid4()),
+            "id": new_id,           # FIX
             "name": m.name,
             "version": m.version,
             "metadata": meta,
         }
 
         self._models.append(entry)
-        self._index[entry["id"]] = entry
-        self._order.append(entry["id"])
+        self._index[new_id] = entry
+        self._order.append(new_id)
         return entry
 
     # ------------------------------------------------------------------ #
@@ -58,12 +64,7 @@ class RegistryService:
         limit: int = 20,
         cursor: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        List models/artifacts, optionally filtering by regex q over
-        `name` and metadata["card"], and using a simple numeric cursor.
-        """
 
-        # Start index
         start = 0
         if cursor:
             try:
@@ -71,10 +72,8 @@ class RegistryService:
             except Exception:
                 start = 0
 
-        # Base list
         models = list(self._models)
 
-        # Regex filter
         if q:
             try:
                 pat = re.compile(q)
@@ -89,8 +88,7 @@ class RegistryService:
                         filtered.append(m)
                 models = filtered
 
-        # Pagination
-        items = models[start : start + limit]
+        items = models[start: start + limit]
         next_cursor = (
             str(start + limit) if (start + limit) < len(models) else None
         )
@@ -134,61 +132,29 @@ class RegistryService:
     # LINEAGE GRAPH
     # ------------------------------------------------------------------ #
     def get_lineage_graph(self, id_: str) -> Dict[str, Any]:
-        """
-        Build a lineage graph rooted at the model with id `id_`.
-
-        The graph is derived *only* from registry metadata, in particular
-        metadata["parents"], which is expected to be a list of parent model
-        names (e.g., Hugging Face model ids).
-
-        The returned structure is:
-        {
-          "root_id": "<id_>",
-          "nodes": [
-            {"id": "<model_id>", "name": "<model_name>"},
-            ...
-          ],
-          "edges": [
-            {"parent": "<parent_id>", "child": "<child_id>"},
-            ...
-          ],
-        }
-
-        Only models currently present in the registry are included in the
-        graph, matching the Phase 2 requirement.
-        """
-        # 1) Locate root model
         root = self.get(id_)
         if root is None:
             raise KeyError(f"Model {id_} not found")
 
-        # 2) Build helper maps for quick lookups
         all_models: List[Dict[str, Any]] = list(self._models)
         id_map: Dict[str, Dict[str, Any]] = {m["id"]: m for m in all_models}
         name_map: Dict[str, Dict[str, Any]] = {m["name"]: m for m in all_models}
 
-        # parents_of[model_id] -> list of parent *names* (strings)
         parents_of: Dict[str, List[str]] = {}
         for m in all_models:
             meta = m.get("metadata") or {}
             parents = meta.get("parents") or []
-            # normalize: ensure it's always a list of strings
-            parents_of[m["id"]] = [
-                p for p in parents if isinstance(p, str) and p
-            ]
+            parents_of[m["id"]] = [p for p in parents if isinstance(p, str) and p]
 
-        # 3) Reverse map: children_of[parent_id] -> list of child_ids
         children_of: Dict[str, List[str]] = {}
         for child_id, parent_names in parents_of.items():
             for pname in parent_names:
                 parent_model = name_map.get(pname)
                 if not parent_model:
-                    # Parent not in registry → ignore (per spec)
                     continue
                 pid = parent_model["id"]
                 children_of.setdefault(pid, []).append(child_id)
 
-        # 4) BFS starting from root, collecting reachable nodes and edges
         visited = set()
         nodes: Dict[str, Dict[str, Any]] = {}
         edges: List[Dict[str, str]] = []
@@ -201,7 +167,6 @@ class RegistryService:
             cur_model = id_map[cur_id]
             nodes[cur_id] = {"id": cur_id, "name": cur_model["name"]}
 
-            # Parent edges: parent (p) → child (cur)
             for pname in parents_of.get(cur_id, []):
                 p_model = name_map.get(pname)
                 if not p_model:
@@ -213,7 +178,6 @@ class RegistryService:
                     visited.add(pid)
                     queue.append(pid)
 
-            # Child edges: cur → each registered child
             for child_id in children_of.get(cur_id, []):
                 c_model = id_map[child_id]
                 nodes[child_id] = {"id": child_id, "name": c_model["name"]}
@@ -234,11 +198,13 @@ class RegistryService:
     def reset(self) -> None:
         """
         Reset the registry to a clean state.
-
-        IMPORTANT:
-        _models MUST be an empty LIST — NOT a dict.
         """
         self._models = []
         self._index = {}
         self._order = []
         self._cursor_map = {}
+
+        # ------------------------------------------------------------
+        # FIX: Reset ID counter also
+        # ------------------------------------------------------------
+        self._id_counter = 0
