@@ -131,7 +131,7 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
 
     metrics = compute_metrics_for_model(base_resource)
     reviewedness = float(metrics.get("reviewedness", 0.0) or 0.0)
-    if False: #reviewedness < 0.5:
+    if reviewedness < 0.5:
         raise HTTPException(
             status_code=424,
             detail=f"Ingest rejected: reviewedness={reviewedness:.2f} < 0.50",
