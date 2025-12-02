@@ -1,60 +1,30 @@
-import json
 import logging
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.types import ASGIApp, Scope, Receive, Send
 
 logger = logging.getLogger("request_logger")
 if not logger.handlers:
     logging.basicConfig(level=logging.INFO)
 
+class RequestResponseLogger:
+    def __init__(self, app: ASGIApp):
+        self.app = app
 
-class RequestResponseLogger(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        # ---------------- REQUEST ----------------
-        try:
-            body_bytes = await request.body()
-            body_text = body_bytes.decode("utf-8") if body_bytes else ""
-        except Exception:
-            body_text = "<unreadable>"
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-        logger.info(
-            f"[REQUEST] method={request.method} path={request.url.path} "
-            f"query={request.url.query} body={body_text}"
-        )
+        method = scope["method"]
+        path = scope["path"]
+        query = scope.get("query_string", b"").decode()
 
-        # ---------------- RESPONSE ----------------
-        response = await call_next(request)
+        logger.info(f"[REQUEST] {method} {path} ?{query}")
 
-        body = b""
+        # Wrap send() to capture response
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                status = message["status"]
+                logger.info(f"[RESPONSE] {status} {path}")
+            await send(message)
 
-        # Try async iterator first
-        try:
-            async for chunk in response.body_iterator:
-                body += chunk
-        except TypeError:
-            # If it's a normal iterator (Swagger docs, errors, JSON)
-            try:
-                for chunk in response.body_iterator:
-                    body += chunk
-            except Exception:
-                body = b"<unreadable>"
-
-        # Rebuild the response (important)
-        new_response = Response(
-            content=body,
-            status_code=response.status_code,
-            headers=dict(response.headers),
-            media_type=response.media_type,
-        )
-
-        try:
-            body_text = body.decode("utf-8")
-        except Exception:
-            body_text = "<binary>"
-
-        logger.info(
-            f"[RESPONSE] status={response.status_code} "
-            f"path={request.url.path} body={body_text}"
-        )
-
-        return new_response
+        await self.app(scope, receive, send_wrapper)
