@@ -1,31 +1,38 @@
 import logging
-from starlette.types import ASGIApp, Scope, Receive, Send
+from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger("request_logger")
+logger.setLevel(logging.INFO)
+
+# Attach a stream handler explicitly (Lambda requires this)
 if not logger.handlers:
-    logging.basicConfig(level=logging.INFO)
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
-class RequestResponseLogger:
-    def __init__(self, app: ASGIApp):
-        self.app = app
+class RequestResponseLogger(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        # Request log
+        body_bytes = await request.body()
+        body_text = body_bytes.decode("utf-8") if body_bytes else ""
 
-    async def __call__(self, scope: Scope, receive: Receive, send: Send):
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
+        logger.info(f"[REQUEST] {request.method} {request.url.path}?{request.url.query} body={body_text}")
 
-        method = scope["method"]
-        path = scope["path"]
-        query = scope.get("query_string", b"").decode()
+        response = await call_next(request)
 
-        logger.info(f"[REQUEST] {method} {path} ?{query}")
+        # Read response body
+        response_body = b""
+        async for chunk in response.body_iterator:
+            response_body += chunk
 
-        # Wrap send() to capture response
-        async def send_wrapper(message):
-            if message["type"] == "http.response.start":
-                status = message["status"]
-                logger.info(f"[RESPONSE] {status} {path}")
-            await send(message)
+        response.body_iterator = iter([response_body])
 
-        await self.app(scope, receive, send_wrapper)
+        try:
+            body_str = response_body.decode("utf-8")
+        except:
+            body_str = "<binary>"
 
+        logger.info(f"[RESPONSE] {response.status_code} {request.url.path} body={body_str}")
+
+        return response
