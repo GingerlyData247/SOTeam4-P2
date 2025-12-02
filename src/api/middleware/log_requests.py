@@ -1,40 +1,33 @@
 import logging
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.concurrency import iterate_in_threadpool
+from starlette.requests import Request
 
 logger = logging.getLogger("request_logger")
-if not logger.handlers:
-    logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO)
 
 
 class RequestResponseLogger(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        # --- Log Request ---
+    async def dispatch(self, request: Request, call_next):
+
+        # ---- Log request ----
         try:
-            body = await request.body()
-            body_text = body.decode("utf-8") if body else ""
+            body_bytes = await request.body()
+            body_text = body_bytes.decode("utf-8") if body_bytes else ""
         except Exception:
             body_text = "<unreadable>"
 
-        logger.info(f"[REQUEST] {request.method} {request.url.path}?{request.url.query} body={body_text}")
+        logger.info(
+            f"[REQUEST] method={request.method} path={request.url.path} "
+            f"query={request.url.query} body={body_text}"
+        )
 
-        # --- Process Response ---
+        # ---- Get response ----
         response = await call_next(request)
 
-        # Read entire response body (async-friendly)
-        raw_body = b""
-        async for chunk in response.body_iterator:
-            raw_body += chunk
-
-        # Reset the async iterator properly (THIS FIXES THE CRASH)
-        response.body_iterator = iterate_in_threadpool([raw_body])
-
-        # Log Response
-        try:
-            decoded = raw_body.decode("utf-8")
-        except Exception:
-            decoded = "<binary>"
-
-        logger.info(f"[RESPONSE] {response.status_code} {request.url.path} body={decoded}")
+        # ---- CANNOT READ body_iterator (breaks streaming / Mangum)
+        # So only log status + path
+        logger.info(
+            f"[RESPONSE] status={response.status_code} path={request.url.path}"
+        )
 
         return response
