@@ -5,9 +5,11 @@ from starlette.requests import Request
 logger = logging.getLogger("request_logger")
 logging.basicConfig(level=logging.INFO)
 
+print("### MIDDLEWARE LOADED FROM:", __file__)
 
 class RequestResponseLogger(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        print(f"### MIDDLEWARE SAW REQUEST: {request.method} {request.url.path}")
 
         # ---- Log request ----
         try:
@@ -31,3 +33,4 @@ class RequestResponseLogger(BaseHTTPMiddleware):
         )
 
         return response
+
