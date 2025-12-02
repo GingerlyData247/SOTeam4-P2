@@ -11,9 +11,12 @@ from mangum import Mangum
 # IMPORTANT: import ONLY the router, not the module
 from src.api.routers.models import router as models_router
 from src.api.routes_s3 import router as s3_router
+from src.api.middleware.log_requests import RequestResponseLogger
 
 
 app = FastAPI(title="SOTeam4P2 API")
+
+app.add_middleware(RequestResponseLogger)
 
 # --- CORS setup ---
 origins = [
@@ -42,7 +45,7 @@ app.add_middleware(
 #   /api/ingest
 #   /api/health
 #   /api/tracks
-app.include_router(models_router, prefix="/api")
+app.include_router(models_router) #, prefix="/api")
 
 # Mount S3 routes (these already include their own /api/s3 prefix)
 app.include_router(s3_router)
@@ -50,7 +53,7 @@ app.include_router(s3_router)
 # -------------------------------------------------------------
 # Environment debugging endpoint
 # -------------------------------------------------------------
-@app.get("/api/env")
+@app.get("/env")
 def get_env_values():
     return {
         "S3_BUCKET": os.getenv("S3_BUCKET"),
