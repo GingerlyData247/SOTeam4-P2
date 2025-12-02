@@ -202,12 +202,9 @@ def get_tracks():
     return {"plannedTracks": ["Performance track"]}
 
 # =======================================================================
-# 🔥 STATIC ROUTES FIRST — critical fix (regex, byName, model/*)
+# 🔥 STATIC ROUTES FIRST
 # =======================================================================
 
-# -----------------------
-# POST /artifact/byRegEx
-# -----------------------
 @router.post("/artifact/byRegEx", response_model=List[ArtifactMetadata])
 def artifact_by_regex(body: ArtifactRegex):
     import re
@@ -246,35 +243,46 @@ def artifact_by_regex(body: ArtifactRegex):
 # -----------------------
 # GET /artifact/byName/{name}
 # -----------------------
-@router.get("/artifact/byName/{name}", response_model=List[ArtifactMetadata])
+
+@router.get("/artifact/byName/{name:path}", response_model=List[ArtifactMetadata])
 def artifact_by_name(name: str):
-    all_items = list(_registry._models)
-    matches = [m for m in all_items if m.get("name") == name]
+    # Normalize input like HF IDs
+    try:
+        norm = normalize_hf_id(name)
+    except Exception:
+        norm = name.strip()
+
+    matches = []
+    for m in _registry._models:
+        stored = m.get("name", "")
+        # Apply same normalization to stored name
+        try:
+            stored_norm = normalize_hf_id(stored)
+        except:
+            stored_norm = stored.strip()
+
+        if stored_norm == norm:
+            matches.append(m)
+
     if not matches:
         raise HTTPException(status_code=404, detail="No such artifact.")
 
-    def infer_type(entry: Dict[str, Any]) -> ArtifactTypeLiteral:
+    def infer_type(entry: Dict[str, Any]):
         meta = entry.get("metadata") or {}
         t = str(meta.get("artifact_type") or "").lower()
         return t if t in ("model", "dataset", "code") else "model"
 
-    def sort_key(entry):
-        try:
-            return int(entry["id"])
-        except:
-            return entry["id"]
-
-    sorted_matches = sorted(matches, key=sort_key)
+    matches_sorted = sorted(matches, key=lambda x: int(x["id"]))
 
     return [
         ArtifactMetadata(name=m["name"], id=m["id"], type=infer_type(m))
-        for m in sorted_matches
+        for m in matches_sorted
     ]
 
-# -----------------------
-# model/* static routes
-# -----------------------
 
+# -----------------------
+# model static routes
+# -----------------------
 
 @router.get("/artifact/model/{id}/rate")
 def model_artifact_rate(id: str):
@@ -385,7 +393,7 @@ def artifact_license_check(id: str, body: SimpleLicenseCheckRequest):
     return github_license in LICENSE_COMPATIBILITY.get(model_license, set())
 
 # =======================================================================
-# 🚨 PARAMETERIZED ROUTES COME LAST (critical ordering)
+# PARAMETERIZED ROUTES — MUST COME LAST
 # =======================================================================
 
 @router.post("/artifact/{artifact_type}", response_model=Artifact, status_code=201)
