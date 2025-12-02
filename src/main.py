@@ -45,7 +45,7 @@ app.add_middleware(
 #   /api/ingest
 #   /api/health
 #   /api/tracks
-app.include_router(models_router) #, prefix="/api")
+app.include_router(models_router, prefix="/api")
 
 # Mount S3 routes (these already include their own /api/s3 prefix)
 app.include_router(s3_router)
