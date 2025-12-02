@@ -150,18 +150,8 @@ def _bytes_to_mb(n: int) -> float:
     return round(float(n) / 1_000_000.0, 3)
 
 
-def _tail_component(s: str) -> str:
-    """
-    Helper: return the last path segment of a string like
-    'owner/repo' or 'https://huggingface.co/owner/model'.
-    """
-    if not s:
-        return s
-    return s.strip().rstrip("/").split("/")[-1]
-
-
 # ---------------------------------------------------------------------------
-# Ingest logic
+# Ingest logic (UNCHANGED)
 # ---------------------------------------------------------------------------
 
 
@@ -323,7 +313,7 @@ def artifact_by_regex(body: ArtifactRegex):
         t = str(meta.get("artifact_type") or "").lower()
         return t if t in ("model", "dataset", "code") else "model"
 
-    matches = []
+    matches: List[Dict[str, Any]] = []
     for m in all_items:
         meta = m.get("metadata") or {}
         text_blob = "\n".join(
@@ -335,6 +325,10 @@ def artifact_by_regex(body: ArtifactRegex):
         )
         if pattern.search(text_blob):
             matches.append(m)
+
+    if not matches:
+        logger.warning("artifact_by_regex: NO MATCHES for regex=%s", body.regex)
+        raise HTTPException(status_code=404, detail="No artifact found under this regex.")
 
     logger.info(
         "artifact_by_regex: regex=%s match_count=%d ids=%s",
@@ -371,49 +365,22 @@ def artifact_by_regex(body: ArtifactRegex):
 
 @router.get("/artifact/byName/{name:path}", response_model=List[ArtifactMetadata])
 def artifact_by_name(name: str):
-    logger.info("GET /artifact/byName: raw_name=%s", name)
+    """
+    Spec-aligned behavior: match artifacts whose stored name
+    EXACTLY equals the provided name (after simple strip()).
+    """
+    raw_name = name
+    name = name.strip()
+    logger.info("GET /artifact/byName: raw_name=%s normalized_name=%s", raw_name, name)
 
-    raw = name
-    stripped = name.strip()
-    tail = _tail_component(name)
+    def infer_type(entry: Dict[str, Any]) -> ArtifactTypeLiteral:
+        meta = entry.get("metadata") or {}
+        t = str(meta.get("artifact_type") or "").lower()
+        return t if t in ("model", "dataset", "code") else "model"
 
-    try:
-        norm = normalize_hf_id(name)
-    except Exception as e:
-        logger.warning(
-            "normalize_hf_id failed for input_name=%s error=%s; using stripped name",
-            name,
-            e,
-        )
-        norm = stripped
-
-    norm_tail = _tail_component(norm)
-
-    incoming_candidates = {
-        c for c in (raw, stripped, tail, norm, norm_tail) if c
-    }
-
-    logger.info("artifact_by_name: candidate_keys=%s", list(incoming_candidates))
-
-    matches: List[Dict[str, Any]] = []
-    for m in _registry._models:
-        stored = m.get("name", "") or ""
-        stored_stripped = stored.strip()
-        stored_tail = _tail_component(stored)
-
-        try:
-            stored_norm = normalize_hf_id(stored)
-        except Exception:
-            stored_norm = stored_stripped
-
-        stored_norm_tail = _tail_component(stored_norm)
-
-        stored_candidates = {
-            c for c in (stored_stripped, stored_tail, stored_norm, stored_norm_tail) if c
-        }
-
-        if incoming_candidates.intersection(stored_candidates):
-            matches.append(m)
+    matches: List[Dict[str, Any]] = [
+        m for m in _registry._models if (m.get("name", "") or "").strip() == name
+    ]
 
     logger.info(
         "artifact_by_name: total_items=%d match_count=%d match_ids=%s",
@@ -423,13 +390,8 @@ def artifact_by_name(name: str):
     )
 
     if not matches:
-        logger.warning("artifact_by_name: NO MATCH for input=%s", name)
+        logger.warning("artifact_by_name: NO MATCH for name=%s", name)
         raise HTTPException(status_code=404, detail="No such artifact.")
-
-    def infer_type(entry: Dict[str, Any]):
-        meta = entry.get("metadata") or {}
-        t = str(meta.get("artifact_type") or "").lower()
-        return t if t in ("model", "dataset", "code") else "model"
 
     try:
         matches_sorted = sorted(matches, key=lambda x: int(x["id"]))
@@ -760,7 +722,7 @@ def artifact_cost(
         logger.info(
             "artifact_cost: no lineage graph for id=%s; returning standalone only",
             id,
-            )
+        )
         standalone = _standalone_cost_for(id)
         return {
             str(id): {
@@ -780,7 +742,7 @@ def artifact_cost(
         )
 
     # Build child -> parents mapping so we can walk upstream
-    parents_by_child = {}
+    parents_by_child: Dict[str, set] = {}
     for edge in g.get("edges", []):
         parent_id = str(edge.get("parent") or edge.get("from_node_artifact_id"))
         child_id = str(edge.get("child") or edge.get("to_node_artifact_id"))
@@ -858,6 +820,7 @@ def artifact_create(
         body.download_url,
     )
 
+    # Spec baseline: model ingest (Hugging Face) via /artifact/model
     if artifact_type == "model":
         created = _ingest_hf_core(body.url)
         logger.info(
@@ -878,6 +841,7 @@ def artifact_create(
             ),
         )
 
+    # Spec baseline: dataset & code support
     if artifact_type in ("dataset", "code"):
         parsed = urlparse(body.url)
         path = parsed.path.rstrip("/")
@@ -919,9 +883,14 @@ def artifact_create(
     raise HTTPException(status_code=400, detail="Unsupported artifact_type.")
 
 
-@router.get("/artifact/{artifact_type}/{id}", response_model=Artifact)
+# -----------------------
+# /artifacts/{artifact_type}/{id}
+# -----------------------
+
+
+@router.get("/artifacts/{artifact_type}/{id}", response_model=Artifact)
 def artifact_get(artifact_type: ArtifactTypeLiteral, id: str):
-    logger.info("GET /artifact/%s/%s", artifact_type, id)
+    logger.info("GET /artifacts/%s/%s", artifact_type, id)
     item = _registry.get(id)
     if not item:
         logger.warning(
@@ -934,14 +903,15 @@ def artifact_get(artifact_type: ArtifactTypeLiteral, id: str):
     if stored_type not in ("model", "dataset", "code"):
         stored_type = artifact_type
 
-    source_uri = meta.get("source_uri") or item["name"]
+    # Prefer top-level source_uri (from ModelCreate), fall back to any metadata copy.
+    source_uri = item.get("source_uri") or meta.get("source_uri")
 
     if stored_type == "model":
         url = source_uri or f"https://huggingface.co/{item['name']}"
-        download_url = meta.get("download_url")
     else:
-        url = source_uri
-        download_url = None
+        url = source_uri or item["name"]
+
+    download_url = meta.get("download_url")
 
     logger.info(
         "artifact_get: id=%s stored_type=%s url=%s has_download_url=%s",
@@ -959,10 +929,10 @@ def artifact_get(artifact_type: ArtifactTypeLiteral, id: str):
     )
 
 
-@router.put("/artifact/{artifact_type}/{id}", response_model=Artifact)
+@router.put("/artifacts/{artifact_type}/{id}", response_model=Artifact)
 def artifact_update(artifact_type: str, id: str, body: Artifact):
     logger.info(
-        "PUT /artifact/%s/%s: body_id=%s body_name=%s",
+        "PUT /artifacts/%s/%s: body_id=%s body_name=%s",
         artifact_type,
         id,
         body.metadata.id,
@@ -985,6 +955,8 @@ def artifact_update(artifact_type: str, id: str, body: Artifact):
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
     meta = item.setdefault("metadata", {})
+    # Keep both top-level and metadata copies of source_uri in sync.
+    item["source_uri"] = body.data.url
     meta["source_uri"] = body.data.url
     download_url = meta.get("download_url")
 
@@ -996,20 +968,20 @@ def artifact_update(artifact_type: str, id: str, body: Artifact):
         "artifact_update: id=%s stored_type=%s new_source_uri=%s",
         id,
         stored_type,
-        meta["source_uri"],
+        item["source_uri"],
     )
 
     return Artifact(
         metadata=ArtifactMetadata(
             name=item["name"], id=item["id"], type=stored_type
         ),
-        data=ArtifactData(url=meta["source_uri"], download_url=download_url),
+        data=ArtifactData(url=item["source_uri"], download_url=download_url),
     )
 
 
-@router.delete("/artifact/{artifact_type}/{id}")
+@router.delete("/artifacts/{artifact_type}/{id}")
 def artifact_delete(artifact_type: str, id: str):
-    logger.info("DELETE /artifact/%s/%s", artifact_type, id)
+    logger.info("DELETE /artifacts/%s/%s", artifact_type, id)
     ok = _registry.delete(id)
     if not ok:
         logger.warning(
@@ -1023,7 +995,7 @@ def artifact_delete(artifact_type: str, id: str):
 
 
 # ---------------------------------------------------------------------------
-# POST /artifacts (baseline)
+# POST /artifacts (baseline enumeration)
 # ---------------------------------------------------------------------------
 
 
