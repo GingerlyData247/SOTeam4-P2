@@ -238,6 +238,7 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
 
 @router.get("/health")
 def health():
+    print("### HEALTH ENDPOINT EXECUTED ###")
     uptime = int(time.time() - _START_TIME)
     count = _registry.count_models()
     logger.info("HEALTH: uptime_s=%s models=%s", uptime, count)
