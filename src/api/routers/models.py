@@ -202,7 +202,7 @@ def get_tracks():
     return {"plannedTracks": ["Performance track"]}
 
 # =======================================================================
-# STATIC ROUTES FIRST
+# 🔥 STATIC ROUTES FIRST — critical fix (regex, byName, model/*)
 # =======================================================================
 
 # -----------------------
@@ -272,8 +272,10 @@ def artifact_by_name(name: str):
     ]
 
 # -----------------------
-# GET /artifact/model/{id}/rate
+# model/* static routes
 # -----------------------
+
+
 @router.get("/artifact/model/{id}/rate")
 def model_artifact_rate(id: str):
     item = _registry.get(id)
@@ -328,9 +330,6 @@ def model_artifact_rate(id: str):
         "size_score_latency": size_latency,
     }
 
-# -----------------------
-# GET /artifact/model/{id}/lineage
-# -----------------------
 @router.get("/artifact/model/{id}/lineage")
 def artifact_lineage(id: str):
     try:
@@ -359,9 +358,6 @@ def artifact_lineage(id: str):
 
     return {"nodes": nodes_out, "edges": edges_out}
 
-# -----------------------
-# POST /artifact/model/{id}/license-check
-# -----------------------
 @router.post("/artifact/model/{id}/license-check")
 def artifact_license_check(id: str, body: SimpleLicenseCheckRequest):
     item = _registry.get(id)
@@ -388,16 +384,8 @@ def artifact_license_check(id: str, body: SimpleLicenseCheckRequest):
 
     return github_license in LICENSE_COMPATIBILITY.get(model_license, set())
 
-# -----------------------
-# FIXED: GET /artifact/model/{id}
-# -----------------------
-@router.get("/artifact/model/{id}")
-def artifact_model_get_stub(id: str):
-    # Important: return 405 so this stub does NOT shadow /artifact/{artifact_type}/{id}
-    raise HTTPException(status_code=405, detail="Use /artifact/{artifact_type}/{id}")
-
 # =======================================================================
-# PARAMETERIZED ROUTES (MUST COME LAST)
+# 🚨 PARAMETERIZED ROUTES COME LAST (critical ordering)
 # =======================================================================
 
 @router.post("/artifact/{artifact_type}", response_model=Artifact, status_code=201)
@@ -545,3 +533,7 @@ def artifacts_list(
         ArtifactMetadata(name=m["name"], id=m["id"], type=infer_type(m))
         for m in slice_
     ]
+
+@router.get("/artifact/model/{id}")
+def artifact_model_get_stub(id: str):
+    return {"detail": "Use /artifact/model/{id}/rate for model ratings."}
