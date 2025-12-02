@@ -151,7 +151,7 @@ def _bytes_to_mb(n: int) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Ingest logic (UNCHANGED)
+# Ingest logic (UNCHANGED core behavior)
 # ---------------------------------------------------------------------------
 
 
@@ -1016,6 +1016,7 @@ def artifacts_list(
         t = str(meta.get("artifact_type") or "").lower()
         return t if t in ("model", "dataset", "code") else "model"
 
+    # OpenAPI spec: you can pass [ { "name": "*" } ] to enumerate all.
     q = queries[0] if queries else ArtifactQuery(name="*", types=None)
     all_items = list(_registry._models)
     logger.info(
@@ -1028,7 +1029,8 @@ def artifacts_list(
     if q.name == "*" or not q.name:
         name_filtered = all_items
     else:
-        name_filtered = [m for m in all_items if m.get("name") == q.name]
+        # STRICT equality on stored name, per ArtifactName semantics
+        name_filtered = [m for m in all_items if (m.get("name") or "") == q.name]
 
     logger.info(
         "artifacts_list: after name filter count=%d",
