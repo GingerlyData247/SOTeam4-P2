@@ -1,4 +1,4 @@
-"""import logging
+import logging
 from starlette.types import ASGIApp, Scope, Receive, Send
 
 logger = logging.getLogger("request_logger")
@@ -28,4 +28,4 @@ class RequestResponseLogger:
             await send(message)
 
         await self.app(scope, receive, send_wrapper)
-"""
+
