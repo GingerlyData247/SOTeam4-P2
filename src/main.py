@@ -13,10 +13,11 @@ from src.api.routers.models import router as models_router
 from src.api.routes_s3 import router as s3_router
 from src.api.middleware.log_requests import RequestResponseLogger
 
+print(">>> MIDDLEWARE ACTIVE <<<")
+app.add_middleware(RequestResponseLogger)
 
 app = FastAPI(title="SOTeam4P2 API")
 
-app.add_middleware(RequestResponseLogger)
 
 # --- CORS setup ---
 origins = [
