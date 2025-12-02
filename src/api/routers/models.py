@@ -536,6 +536,217 @@ def artifact_license_check(id: str, body: SimpleLicenseCheckRequest):
     )
     return compatible
 
+@router.get("/artifact/{artifact_type}/{id}/cost")
+def artifact_cost(
+    artifact_type: ArtifactTypeLiteral,
+    id: str,
+    dependency: bool = Query(False),
+):
+    """
+    Compute artifact download cost in MB.
+
+    - If dependency == False:
+        Return only the requested artifact id:
+            { "<id>": { "total_cost": <float> } }
+
+    - If dependency == True:
+        Include the artifact and all upstream dependencies
+        discovered via the lineage graph:
+            {
+              "<root_id>": {
+                "standalone_cost": <float>,
+                "total_cost": <float>  # root + deps
+              },
+              "<dep_id>": {
+                "standalone_cost": <float>,
+                "total_cost": <float>  # usually == standalone_cost
+              },
+              ...
+            }
+    """
+    logger.info(
+        "GET /artifact/%s/%s/cost dependency=%s",
+        artifact_type,
+        id,
+        dependency,
+    )
+
+    item = _registry.get(id)
+    if not item:
+        logger.warning(
+            "artifact_cost: artifact not found: artifact_type=%s id=%s",
+            artifact_type,
+            id,
+        )
+        raise HTTPException(status_code=404, detail="Artifact does not exist.")
+
+    def _standalone_cost_for(artifact_id: str) -> float:
+        """
+        Best-effort estimate of download size in MB from metadata.
+        Falls back to 0.0 when no size info is available.
+        """
+        art = _registry.get(artifact_id)
+        if not art:
+            logger.warning(
+                "artifact_cost: missing artifact for id=%s while computing size",
+                artifact_id,
+            )
+            return 0.0
+
+        meta = art.get("metadata") or {}
+
+        # Prefer explicit byte counts if available.
+        size_bytes = None
+        for key in (
+            "download_size_bytes",
+            "size_bytes",
+            "artifact_size_bytes",
+        ):
+            v = meta.get(key)
+            if isinstance(v, (int, float)):
+                size_bytes = int(v)
+                break
+
+        if size_bytes is not None:
+            mb = _bytes_to_mb(size_bytes)
+            logger.info(
+                "artifact_cost: id=%s size_bytes=%s size_mb=%s (from %s)",
+                artifact_id,
+                size_bytes,
+                mb,
+                key,
+            )
+            return mb
+
+        # Try direct MB fields if present.
+        for key in (
+            "download_size_mb",
+            "size_mb",
+        ):
+            v = meta.get(key)
+            if isinstance(v, (int, float)):
+                logger.info(
+                    "artifact_cost: id=%s size_mb=%s (from %s)",
+                    artifact_id,
+                    float(v),
+                    key,
+                )
+                return float(v)
+
+        # No size info available – treat as 0 MB.
+        logger.info(
+            "artifact_cost: id=%s no size metadata; using 0.0 MB",
+            artifact_id,
+        )
+        return 0.0
+
+    # ----------------------------
+    # No dependency aggregation
+    # ----------------------------
+    if not dependency:
+        standalone = _standalone_cost_for(id)
+        result = {
+            str(id): {
+                "total_cost": standalone,
+            }
+        }
+        logger.info(
+            "artifact_cost: dependency=False id=%s total_cost=%s",
+            id,
+            standalone,
+        )
+        return result
+
+    # ----------------------------
+    # dependency == True
+    # ----------------------------
+    # Gather all reachable upstream dependencies via lineage graph.
+    try:
+        g = _registry.get_lineage_graph(id)
+    except KeyError:
+        # No lineage graph; fall back to standalone only.
+        logger.info(
+            "artifact_cost: no lineage graph for id=%s; returning standalone only",
+            id,
+        )
+        standalone = _standalone_cost_for(id)
+        return {
+            str(id): {
+                "standalone_cost": standalone,
+                "total_cost": standalone,
+            }
+        }
+    except Exception as e:
+        logger.warning(
+            "artifact_cost: error computing lineage graph for id=%s error=%s",
+            id,
+            e,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="The artifact cost calculator encountered an error.",
+        )
+
+    # Build child -> parents mapping so we can walk upstream
+    parents_by_child = {}
+    for edge in g.get("edges", []):
+        parent_id = str(edge.get("parent") or edge.get("from_node_artifact_id"))
+        child_id = str(edge.get("child") or edge.get("to_node_artifact_id"))
+        if not parent_id or not child_id:
+            continue
+        parents_by_child.setdefault(child_id, set()).add(parent_id)
+
+    # Collect all upstream nodes (including the root)
+    reachable: set[str] = set()
+    stack = [str(id)]
+    while stack:
+        current = stack.pop()
+        if current in reachable:
+            continue
+        reachable.add(current)
+        for p in parents_by_child.get(current, ()):
+            if p not in reachable:
+                stack.append(p)
+
+    logger.info(
+        "artifact_cost: dependency=True id=%s reachable_count=%d ids=%s",
+        id,
+        len(reachable),
+        list(reachable),
+    )
+
+    # Compute standalone cost for each reachable artifact
+    standalone_map: Dict[str, float] = {}
+    for aid in reachable:
+        standalone_map[aid] = _standalone_cost_for(aid)
+
+    # Root total cost is sum over all reachable artifacts.
+    root_total = sum(standalone_map.values())
+
+    result: Dict[str, Dict[str, float]] = {}
+    for aid, standalone in standalone_map.items():
+        if aid == str(id):
+            # For the root, total_cost includes all dependencies.
+            result[aid] = {
+                "standalone_cost": standalone,
+                "total_cost": root_total,
+            }
+        else:
+            # For dependencies, total_cost == standalone_cost.
+            result[aid] = {
+                "standalone_cost": standalone,
+                "total_cost": standalone,
+            }
+
+    logger.info(
+        "artifact_cost: dependency=True id=%s root_standalone=%s root_total=%s",
+        id,
+        standalone_map.get(str(id), 0.0),
+        root_total,
+    )
+    return result
+
+
 # =======================================================================
 # PARAMETERIZED ROUTES — MUST COME LAST
 # =======================================================================
