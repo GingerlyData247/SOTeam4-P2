@@ -11,12 +11,12 @@ from mangum import Mangum
 # IMPORTANT: import ONLY the router, not the module
 from src.api.routers.models import router as models_router
 from src.api.routes_s3 import router as s3_router
-from src.api.middleware.log_requests import RequestResponseLogger
+#from src.api.middleware.log_requests import RequestResponseLogger
 
 
 app = FastAPI(title="SOTeam4P2 API")
 
-app.add_middleware(RequestResponseLogger)
+#app.add_middleware(RequestResponseLogger)
 
 # --- CORS setup ---
 origins = [
