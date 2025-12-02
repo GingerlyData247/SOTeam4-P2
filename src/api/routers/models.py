@@ -389,11 +389,12 @@ def artifact_license_check(id: str, body: SimpleLicenseCheckRequest):
     return github_license in LICENSE_COMPATIBILITY.get(model_license, set())
 
 # -----------------------
-# FIXED: GET /artifact/model/{id} (after rate + returns 404)
+# FIXED: GET /artifact/model/{id}
 # -----------------------
 @router.get("/artifact/model/{id}")
 def artifact_model_get_stub(id: str):
-    raise HTTPException(status_code=404, detail="Not found.")
+    # Important: return 405 so this stub does NOT shadow /artifact/{artifact_type}/{id}
+    raise HTTPException(status_code=405, detail="Use /artifact/{artifact_type}/{id}")
 
 # =======================================================================
 # PARAMETERIZED ROUTES (MUST COME LAST)
