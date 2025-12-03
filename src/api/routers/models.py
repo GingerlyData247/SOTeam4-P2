@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
-from fastapi import APIRouter, Body, HTTPException, Path, Query, Response, Header
+from fastapi import APIRouter, Body, HTTPException, Path, Query, Response
 from pydantic import BaseModel
 
 from ...schemas.models import ModelCreate
@@ -419,99 +419,67 @@ def artifact_by_name(name: str):
 
 @router.get("/artifact/model/{id}/rate")
 def model_artifact_rate(id: str):
-    """
-    Compute and return a full ModelRating for an artifact.
-    Conforms exactly to the Phase 2 OpenAPI specification.
-    """
-    # 1. Fetch artifact
+    logger.info("GET /artifact/model/%s/rate", id)
     item = _registry.get(id)
     if not item:
+        logger.warning("model_artifact_rate: artifact not found: id=%s", id)
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
+    meta = item.get("metadata") or {}
 
-    # Registry may return a dict or Pydantic object
-    if isinstance(item, dict):
-        name = item.get("name")
-        url = item.get("url")
-        metadata = item.get("metadata", {})
-    else:
-        name = item.name
-        url = item.url
-        metadata = item.metadata or {}
+    def g(name: str, alt: Optional[str] = None, default: float = 0.0) -> float:
+        """
+        Safely pull a float metric from metadata, trying a primary key and
+        an optional fallback key.
+        """
+        keys = (name, alt) if alt else (name,)
+        for k in keys:
+            if not k:
+                continue
+            v = meta.get(k)
+            if isinstance(v, (int, float)):
+                return float(v)
+        return default
 
-    if not url:
-        raise HTTPException(
-            status_code=400,
-            detail="Artifact is missing a source URL for rating."
-        )
+    size_metric = meta.get("size_score") or meta.get("size") or {}
+    size_latency = g("size_score_latency", alt="size_latency")
+    tree_score = g("tree_score", alt="treescore")
+    tree_latency = g("tree_score_latency", alt="treescore_latency")
 
-    # 2. Build resource object for scoring service
-    resource = {
-        "name": name,
-        "url": url,
-        "github_url": metadata.get("github_url"),
-        "local_path": None,
-        "skip_repo_metrics": False,
-        "category": "MODEL",
+    resp = {
+        "name": meta.get("name") or item["name"],
+        "category": meta.get("category", ""),
+        "net_score": g("net_score"),
+        "net_score_latency": g("net_score_latency"),
+        "ramp_up_time": g("ramp_up_time"),
+        "ramp_up_time_latency": g("ramp_up_time_latency"),
+        "bus_factor": g("bus_factor"),
+        "bus_factor_latency": g("bus_factor_latency"),
+        "performance_claims": g("performance_claims"),
+        "performance_claims_latency": g("performance_claims_latency"),
+        "license": g("license"),
+        "license_latency": g("license_latency"),
+        "dataset_and_code_score": g("dataset_and_code_score"),
+        "dataset_and_code_score_latency": g("dataset_and_code_score_latency"),
+        "dataset_quality": g("dataset_quality"),
+        "dataset_quality_latency": g("dataset_quality_latency"),
+        "code_quality": g("code_quality"),
+        "code_quality_latency": g("code_quality_latency"),
+        "reproducibility": g("reproducibility"),
+        "reproducibility_latency": g("reproducibility_latency"),
+        "reviewedness": g("reviewedness"),
+        "reviewedness_latency": g("reviewedness_latency"),
+        "tree_score": tree_score,
+        "tree_score_latency": tree_latency,
+        "size_score": {
+            "raspberry_pi": float(size_metric.get("raspberry_pi", 0.0)),
+            "jetson_nano": float(size_metric.get("jetson_nano", 0.0)),
+            "desktop_pc": float(size_metric.get("desktop_pc", 0.0)),
+            "aws_server": float(size_metric.get("aws_server", 0.0)),
+        },
+        "size_score_latency": size_latency,
     }
-
-    # 3. Compute rating via scoring service
-    rating = _scoring.rate(resource)
-
-    # 4. Extract subs into individual fields as the spec requires
-    subs = rating["subs"]
-
-    # Pull size score sub-object (dict of device metrics)
-    size_map = subs.get("size_score", {})
-    size_score_struct = {
-        "raspberry_pi": float(size_map.get("raspberry_pi", 0.0)),
-        "jetson_nano": float(size_map.get("jetson_nano", 0.0)),
-        "desktop_pc": float(size_map.get("desktop_pc", 0.0)),
-        "aws_server": float(size_map.get("aws_server", 0.0)),
-    }
-
-    # 5. Reassemble into EXACT ModelRating response schema
-    response = {
-        "name": name,
-        "category": "model",  # spec requires lowercase
-        "net_score": float(rating["net"]),
-        "net_score_latency": float(rating["latency_ms"]),
-
-        "ramp_up_time": float(subs.get("ramp_up_time", 0.0)),
-        "ramp_up_time_latency": float(subs.get("ramp_up_time_latency", 0.0)),
-
-        "bus_factor": float(subs.get("bus_factor", 0.0)),
-        "bus_factor_latency": float(subs.get("bus_factor_latency", 0.0)),
-
-        "performance_claims": float(subs.get("performance_claims", 0.0)),
-        "performance_claims_latency": float(subs.get("performance_claims_latency", 0.0)),
-
-        "license": float(subs.get("license", 0.0)),
-        "license_latency": float(subs.get("license_latency", 0.0)),
-
-        "dataset_and_code_score": float(subs.get("dataset_and_code_score", 0.0)),
-        "dataset_and_code_score_latency": float(subs.get("dataset_and_code_score_latency", 0.0)),
-
-        "dataset_quality": float(subs.get("dataset_quality", 0.0)),
-        "dataset_quality_latency": float(subs.get("dataset_quality_latency", 0.0)),
-
-        "code_quality": float(subs.get("code_quality", 0.0)),
-        "code_quality_latency": float(subs.get("code_quality_latency", 0.0)),
-
-        "reproducibility": float(subs.get("reproducibility", 0.0)),
-        "reproducibility_latency": float(subs.get("reproducibility_latency", 0.0)),
-
-        "reviewedness": float(subs.get("reviewedness", 0.0)),
-        "reviewedness_latency": float(subs.get("reviewedness_latency", 0.0)),
-
-        "tree_score": float(subs.get("tree_score", 0.0)),
-        "tree_score_latency": float(subs.get("tree_score_latency", 0.0)),
-
-        "size_score": size_score_struct,
-        "size_score_latency": float(subs.get("size_score_latency", 0.0)),
-    }
-
-    return response
-
+    logger.info("model_artifact_rate: id=%s net_score=%s", id, resp["net_score"])
+    return resp
 
 
 @router.get("/artifact/model/{id}/lineage")
@@ -1061,8 +1029,7 @@ def artifact_delete(artifact_type: str, id: str):
 def artifacts_list(
     queries: List[ArtifactQuery],
     response: Response,
-    offset: Optional[int] = Query(default=0),
-    x_auth: str = Header(None, alias="X-Authorization")
+    offset: Optional[str] = Query(None),
 ):
     logger.info(
         "POST /artifacts: raw_queries=%s offset=%s",
@@ -1070,31 +1037,13 @@ def artifacts_list(
         offset,
     )
 
-    # -----------------------------------------------------------
-    # 1. Authentication (required by spec)
-    # -----------------------------------------------------------
-    if not x_auth:
-        logger.warning("artifacts_list: missing X-Authorization header")
-        raise HTTPException(status_code=403, detail="Authentication failed.")
+    def infer_type(entry: Dict[str, Any]) -> ArtifactTypeLiteral:
+        meta = entry.get("metadata") or {}
+        t = str(meta.get("artifact_type") or "").lower()
+        return t if t in ("model", "dataset", "code") else "model"
 
-    # -----------------------------------------------------------
-    # 2. Validate request body
-    # -----------------------------------------------------------
-    if not isinstance(queries, list) or len(queries) == 0:
-        logger.warning("artifacts_list: invalid or missing query array")
-        raise HTTPException(
-            status_code=400,
-            detail="There is missing field(s) in the artifact_query or it is formed improperly, or is invalid."
-        )
-
-    q = queries[0]
-    if q.name is None:
-        logger.warning("artifacts_list: query missing required 'name' field")
-        raise HTTPException(
-            status_code=400,
-            detail="Missing name field in artifact_query."
-        )
-
+    # OpenAPI spec: you can pass [ { "name": "*" } ] to enumerate all.
+    q = queries[0] if queries else ArtifactQuery(name="*", types=None)
     all_items = list(_registry._models)
     logger.info(
         "artifacts_list: total_items=%d query_name=%s query_types=%s",
@@ -1103,123 +1052,51 @@ def artifacts_list(
         q.types,
     )
 
-    # -----------------------------------------------------------
-    # 3. Name filtering (NO regex — literal match or *).
-    # -----------------------------------------------------------
-    if q.name == "*" or q.name.strip() == "":
+    if q.name == "*" or not q.name:
         name_filtered = all_items
-        logger.info("artifacts_list: wildcard name match → count=%d", len(name_filtered))
     else:
-        target = q.name.strip()
-        name_filtered = [
-            m for m in all_items
-            if (m.get("name", "") == target)
-        ]
-        logger.info(
-            "artifacts_list: literal name match='%s' → count=%d",
-            target,
-            len(name_filtered),
-        )
+        # STRICT equality on stored name
+        name_filtered = [m for m in all_items if (m.get("name") or "") == q.name]
 
-    # -----------------------------------------------------------
-    # 4. Type filtering
-    # -----------------------------------------------------------
-    def infer_type(entry: Dict[str, Any]) -> ArtifactTypeLiteral:
-        meta = entry.get("metadata") or {}
-        t = str(meta.get("artifact_type") or "").lower()
-        if t not in ("model", "dataset", "code"):
-            t = "model"
-        return t
+    logger.info(
+        "artifacts_list: after name filter count=%d",
+        len(name_filtered),
+    )
 
     if q.types:
         allowed = set(q.types)
         type_filtered = [m for m in name_filtered if infer_type(m) in allowed]
-        logger.info(
-            "artifacts_list: type filter applied allowed=%s → count=%d",
-            allowed,
-            len(type_filtered),
-        )
     else:
         type_filtered = name_filtered
-        logger.info(
-            "artifacts_list: no type filter → count=%d",
-            len(type_filtered),
-        )
 
-    # -----------------------------------------------------------
-    # 5. Sort results by ID ASCENDING
-    # -----------------------------------------------------------
-    def sort_key(m):
-        try:
-            return int(m.get("id", ""))
-        except Exception:
-            return m.get("id", "")
-
-    type_filtered.sort(key=sort_key)
     logger.info(
-        "artifacts_list: sorted results count=%d ids=%s",
+        "artifacts_list: after type filter count=%d allowed_types=%s",
         len(type_filtered),
-        [m["id"] for m in type_filtered],
+        q.types,
     )
 
-    # -----------------------------------------------------------
-    # 6. Pagination via offset
-    # -----------------------------------------------------------
-    try:
-        offset_val = int(offset) if offset is not None else 0
-    except Exception:
-        logger.warning("artifacts_list: invalid offset provided, defaulting to 0")
-        offset_val = 0
+    start = 0
+    if offset:
+        try:
+            start = int(offset)
+        except Exception:
+            start = 0
 
-    if offset_val < 0:
-        offset_val = 0
+    page_size = 1000
+    slice_ = type_filtered[start : start + page_size]
+    next_offset = start + page_size if (start + page_size) < len(type_filtered) else None
 
-    slice_ = type_filtered[offset_val:]
-    logger.info(
-        "artifacts_list: pagination start_offset=%d returned_count=%d",
-        offset_val,
-        len(slice_),
-    )
-
-    # -----------------------------------------------------------
-    # 7. Too many results (spec 413)
-    # -----------------------------------------------------------
-    MAX_RETURN = 10000  # suitable upper bound
-    if len(slice_) > MAX_RETURN:
-        logger.warning(
-            "artifacts_list: too many artifacts returned count=%d > max=%d",
-            len(slice_),
-            MAX_RETURN,
-        )
-        raise HTTPException(status_code=413, detail="Too many artifacts returned.")
-
-    # -----------------------------------------------------------
-    # 8. Compute next offset header
-    # -----------------------------------------------------------
-    next_offset = offset_val + len(slice_)
-    if next_offset < len(type_filtered):
+    if next_offset is not None:
         response.headers["offset"] = str(next_offset)
-        logger.info("artifacts_list: next_offset=%s", next_offset)
-    else:
-        logger.info("artifacts_list: no further pages (no offset header)")
 
-    # -----------------------------------------------------------
-    # 9. Convert results to ArtifactMetadata
-    # -----------------------------------------------------------
     resp = [
-        ArtifactMetadata(
-            name=m["name"],
-            id=m["id"],
-            type=infer_type(m),
-        )
+        ArtifactMetadata(name=m["name"], id=m["id"], type=infer_type(m))
         for m in slice_
     ]
-
     logger.info(
-        "artifacts_list: final_response_count=%d ids=%s",
+        "artifacts_list: response_count=%d ids=%s next_offset=%s",
         len(resp),
         [r.id for r in resp],
+        next_offset,
     )
-
     return resp
-
