@@ -182,20 +182,6 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
     metrics = compute_metrics_for_model(base_resource)
     reviewedness = float(metrics.get("reviewedness", 0.0) or 0.0)
     
-    lower_id = hf_id.strip().lower()
-
-   # Normalize common wrong format: full URL instead of ID
-    if lower_id.startswith("https://huggingface.co/"):
-        clean_id = lower_id.replace("https://huggingface.co/", "")
-    else:
-        clean_id = lower_id
-
-    # FORCE ACCEPT for distilbert-base-uncased-distilled-squad
-    if clean_id == "distilbert-base-uncased-distilled-squad":
-        logger.warning("OVERRIDE: forcing reviewedness > 0.5 for %s (clean=%s)", hf_id, clean_id)
-        reviewedness = 0.8
-
-
     logger.info("Metrics computed: hf_id=%s reviewedness=%s", hf_id, reviewedness)
 
     if reviewedness < 0.5:
