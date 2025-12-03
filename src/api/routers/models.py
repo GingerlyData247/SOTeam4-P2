@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
-from fastapi import APIRouter, Body, HTTPException, Path, Query, Response
+from fastapi import APIRouter, Body, HTTPException, Path, Query, Response, Header
 from pydantic import BaseModel
 
 from ...schemas.models import ModelCreate
@@ -1061,7 +1061,8 @@ def artifact_delete(artifact_type: str, id: str):
 def artifacts_list(
     queries: List[ArtifactQuery],
     response: Response,
-    offset: Optional[str] = Query(None),
+    offset: Optional[int] = Query(default=0),
+    x_auth: str = Header(None, alias="X-Authorization")
 ):
     logger.info(
         "POST /artifacts: raw_queries=%s offset=%s",
@@ -1069,13 +1070,31 @@ def artifacts_list(
         offset,
     )
 
-    def infer_type(entry: Dict[str, Any]) -> ArtifactTypeLiteral:
-        meta = entry.get("metadata") or {}
-        t = str(meta.get("artifact_type") or "").lower()
-        return t if t in ("model", "dataset", "code") else "model"
+    # -----------------------------------------------------------
+    # 1. Authentication (required by spec)
+    # -----------------------------------------------------------
+    if not x_auth:
+        logger.warning("artifacts_list: missing X-Authorization header")
+        raise HTTPException(status_code=403, detail="Authentication failed.")
 
-    # OpenAPI spec: you can pass [ { "name": "*" } ] to enumerate all.
-    q = queries[0] if queries else ArtifactQuery(name="*", types=None)
+    # -----------------------------------------------------------
+    # 2. Validate request body
+    # -----------------------------------------------------------
+    if not isinstance(queries, list) or len(queries) == 0:
+        logger.warning("artifacts_list: invalid or missing query array")
+        raise HTTPException(
+            status_code=400,
+            detail="There is missing field(s) in the artifact_query or it is formed improperly, or is invalid."
+        )
+
+    q = queries[0]
+    if q.name is None:
+        logger.warning("artifacts_list: query missing required 'name' field")
+        raise HTTPException(
+            status_code=400,
+            detail="Missing name field in artifact_query."
+        )
+
     all_items = list(_registry._models)
     logger.info(
         "artifacts_list: total_items=%d query_name=%s query_types=%s",
@@ -1084,51 +1103,123 @@ def artifacts_list(
         q.types,
     )
 
-    if q.name == "*" or not q.name:
+    # -----------------------------------------------------------
+    # 3. Name filtering (NO regex — literal match or *).
+    # -----------------------------------------------------------
+    if q.name == "*" or q.name.strip() == "":
         name_filtered = all_items
+        logger.info("artifacts_list: wildcard name match → count=%d", len(name_filtered))
     else:
-        # STRICT equality on stored name
-        name_filtered = [m for m in all_items if (m.get("name") or "") == q.name]
+        target = q.name.strip()
+        name_filtered = [
+            m for m in all_items
+            if (m.get("name", "") == target)
+        ]
+        logger.info(
+            "artifacts_list: literal name match='%s' → count=%d",
+            target,
+            len(name_filtered),
+        )
 
-    logger.info(
-        "artifacts_list: after name filter count=%d",
-        len(name_filtered),
-    )
+    # -----------------------------------------------------------
+    # 4. Type filtering
+    # -----------------------------------------------------------
+    def infer_type(entry: Dict[str, Any]) -> ArtifactTypeLiteral:
+        meta = entry.get("metadata") or {}
+        t = str(meta.get("artifact_type") or "").lower()
+        if t not in ("model", "dataset", "code"):
+            t = "model"
+        return t
 
     if q.types:
         allowed = set(q.types)
         type_filtered = [m for m in name_filtered if infer_type(m) in allowed]
+        logger.info(
+            "artifacts_list: type filter applied allowed=%s → count=%d",
+            allowed,
+            len(type_filtered),
+        )
     else:
         type_filtered = name_filtered
+        logger.info(
+            "artifacts_list: no type filter → count=%d",
+            len(type_filtered),
+        )
 
+    # -----------------------------------------------------------
+    # 5. Sort results by ID ASCENDING
+    # -----------------------------------------------------------
+    def sort_key(m):
+        try:
+            return int(m.get("id", ""))
+        except Exception:
+            return m.get("id", "")
+
+    type_filtered.sort(key=sort_key)
     logger.info(
-        "artifacts_list: after type filter count=%d allowed_types=%s",
+        "artifacts_list: sorted results count=%d ids=%s",
         len(type_filtered),
-        q.types,
+        [m["id"] for m in type_filtered],
     )
 
-    start = 0
-    if offset:
-        try:
-            start = int(offset)
-        except Exception:
-            start = 0
+    # -----------------------------------------------------------
+    # 6. Pagination via offset
+    # -----------------------------------------------------------
+    try:
+        offset_val = int(offset) if offset is not None else 0
+    except Exception:
+        logger.warning("artifacts_list: invalid offset provided, defaulting to 0")
+        offset_val = 0
 
-    page_size = 1000
-    slice_ = type_filtered[start : start + page_size]
-    next_offset = start + page_size if (start + page_size) < len(type_filtered) else None
+    if offset_val < 0:
+        offset_val = 0
 
-    if next_offset is not None:
+    slice_ = type_filtered[offset_val:]
+    logger.info(
+        "artifacts_list: pagination start_offset=%d returned_count=%d",
+        offset_val,
+        len(slice_),
+    )
+
+    # -----------------------------------------------------------
+    # 7. Too many results (spec 413)
+    # -----------------------------------------------------------
+    MAX_RETURN = 10000  # suitable upper bound
+    if len(slice_) > MAX_RETURN:
+        logger.warning(
+            "artifacts_list: too many artifacts returned count=%d > max=%d",
+            len(slice_),
+            MAX_RETURN,
+        )
+        raise HTTPException(status_code=413, detail="Too many artifacts returned.")
+
+    # -----------------------------------------------------------
+    # 8. Compute next offset header
+    # -----------------------------------------------------------
+    next_offset = offset_val + len(slice_)
+    if next_offset < len(type_filtered):
         response.headers["offset"] = str(next_offset)
+        logger.info("artifacts_list: next_offset=%s", next_offset)
+    else:
+        logger.info("artifacts_list: no further pages (no offset header)")
 
+    # -----------------------------------------------------------
+    # 9. Convert results to ArtifactMetadata
+    # -----------------------------------------------------------
     resp = [
-        ArtifactMetadata(name=m["name"], id=m["id"], type=infer_type(m))
+        ArtifactMetadata(
+            name=m["name"],
+            id=m["id"],
+            type=infer_type(m),
+        )
         for m in slice_
     ]
+
     logger.info(
-        "artifacts_list: response_count=%d ids=%s next_offset=%s",
+        "artifacts_list: final_response_count=%d ids=%s",
         len(resp),
         [r.id for r in resp],
-        next_offset,
     )
+
     return resp
+
