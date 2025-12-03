@@ -49,6 +49,7 @@ ArtifactTypeLiteral = Literal["model", "dataset", "code"]
 
 class ArtifactData(BaseModel):
     url: str
+    name: Optional[str] = None
     download_url: Optional[str] = None
 
 
@@ -889,16 +890,22 @@ def artifact_create(
         )
 
     # Spec baseline: dataset & code support
+    # Spec baseline: dataset & code support
     if artifact_type in ("dataset", "code"):
-        parsed = urlparse(body.url)
-        path = parsed.path.rstrip("/")
-        name = path.split("/")[-1] or artifact_type
+        # >>> PATCH START: prefer explicit name from the request <<<
+        if hasattr(body, "name") and body.name:
+            name = body.name.strip()
+        else:
+            parsed = urlparse(body.url)
+            path = parsed.path.rstrip("/")
+            name = path.split("/")[-1] or artifact_type
         logger.info(
-            "artifact_create(%s): url=%s inferred_name=%s",
+            "artifact_create(%s): url=%s final_name=%s",
             artifact_type,
             body.url,
             name,
         )
+        # >>> PATCH END <<<
 
         mc = ModelCreate(
             name=name,
@@ -912,18 +919,9 @@ def artifact_create(
         created = _registry.create(mc)
         created.setdefault("metadata", {})
         created["metadata"]["artifact_type"] = artifact_type
-        # Persist explicit download_url for dataset/code artifacts so
-        # download URL tests can see it again via GET.
+
         if body.download_url:
             created["metadata"]["download_url"] = body.download_url
-
-        logger.info(
-            "artifact_create(%s): url=%s id=%s name=%s",
-            artifact_type,
-            body.url,
-            created.get("id"),
-            name,
-        )
 
         return Artifact(
             metadata=ArtifactMetadata(name=name, id=created["id"], type=artifact_type),
@@ -932,6 +930,7 @@ def artifact_create(
                 download_url=created["metadata"].get("download_url"),
             ),
         )
+
 
     logger.warning("artifact_create: unsupported artifact_type=%s", artifact_type)
     raise HTTPException(status_code=400, detail="Unsupported artifact_type.")
