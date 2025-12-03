@@ -10,8 +10,7 @@ from mangum import Mangum
 
 from src.api.routers.models import router as models_router
 from src.api.routes_s3 import router as s3_router
-from src.api.middleware.log_requests import RequestResponseLogger
-
+from src.api.middleware.log_requests import DeepASGILogger
 
 # -------------------------------------------------------------
 # Create the FastAPI app FIRST
@@ -23,8 +22,7 @@ print(">>> MIDDLEWARE ACTIVE <<<")
 # -------------------------------------------------------------
 # Add middleware SECOND
 # -------------------------------------------------------------
-app.add_middleware(RequestResponseLogger)
-
+app.add_middleware(DeepASGILogger)
 # -------------------------------------------------------------
 # Add CORS middleware
 # -------------------------------------------------------------
