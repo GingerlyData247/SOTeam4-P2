@@ -136,16 +136,12 @@ class ScoringService:
     # ---------------------------------------------------------------------- #
     def rate(self, resource: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Compute metrics for a given model resource and return:
-        {
-          "net": float,
-          "subs": {metric_name: score_or_object},
-          "latency_ms": int
-        }
+        Compute model metrics & return an object matching the ModelRating schema exactly.
         """
+
         results: Dict[str, tuple] = {}
 
-        # ----- Phase 1 + Phase 2 metrics -----
+        # Map internal metric names → modules
         metric_map = {
             "ramp_up_time": ramp_up_time,
             "bus_factor": bus_factor,
@@ -160,82 +156,106 @@ class ScoringService:
             "treescore": treescore,
         }
 
-        # Collect scores and latencies
+        # Compute scores + individual latencies
         for name, mod in metric_map.items():
             try:
                 result = mod.metric(resource)
 
                 if isinstance(result, dict):
-                    # --- Phase 1 size metric format ---
+                    score = (
+                        result.get("score")
+                        or result.get("metric")
+                        or result.get("value")
+                        or 0.0
+                    )
+                    latency = result.get("latency") or result.get("latency_ms") or 0
+
+                    # Special case for size_score Phase 1 format
                     if name == "size_score" and isinstance(result.get("metric"), dict):
                         raw_sizes = result["metric"]
-                        latency = result.get("latency") or 0
-
-                        # Average across devices for netscore
                         avg_score = (
                             sum(v for v in raw_sizes.values() if isinstance(v, (int, float)))
                             / max(len(raw_sizes), 1)
                         )
-                        results[name] = (avg_score, latency, raw_sizes)
-
-                    # --- All other metrics with dict outputs ---
+                        results[name] = (avg_score, latency)
                     else:
-                        score = result.get("score") or result.get("metric") or 0.0
-                        latency = result.get("latency") or result.get("latency_ms") or 0
-                        results[name] = (score, latency)
+                        results[name] = (float(score), latency)
 
                 elif isinstance(result, (list, tuple)) and len(result) >= 2:
                     results[name] = (result[0], result[1])
+
                 else:
                     results[name] = (0.0, 0)
 
             except Exception as e:
-                results[name] = (0.0, 0)
                 print(f"[WARN] {name} metric failed: {e}")
+                results[name] = (0.0, 0)
 
-        # Compute aggregate (same as Phase 1 CLI executable)
+        # Aggregate net score (same logic as Phase 1 executable)
         numeric_scores = []
-        net_latency = 0
-        for v in results.values():
-            score = v[0]
-            latency = v[1]
-            try:
-                net_latency += int(latency or 0)
-            except Exception:
-                pass
-            if isinstance(score, (int, float)) and not isinstance(score, bool):
+        total_latency = 0
+
+        for score, latency in results.values():
+            if isinstance(score, (int, float)):
                 numeric_scores.append(float(score))
+            try:
+                total_latency += int(latency)
+            except:
+                pass
 
         net_score = round(
-            (sum(numeric_scores) / len(numeric_scores)) if numeric_scores else 0.0, 4
+            sum(numeric_scores) / len(numeric_scores) if numeric_scores else 0.0, 4
         )
 
-        # Build subs for API response
-        subs: Dict[str, Any] = {}
-        for k, v in results.items():
-            try:
-                if k == "size_score":
-                    # return the full device map for size_score
-                    if len(v) == 3 and isinstance(v[2], dict):
-                        subs[k] = v[2]
-                    elif isinstance(v[0], dict):
-                        subs[k] = v[0]
-                    else:
-                        subs[k] = float(v[0])
-                else:
-                    if isinstance(v[0], dict):
-                        maybe_val = (
-                            v[0].get("score")
-                            or v[0].get("metric")
-                            or v[0].get("value")
-                            or 0.0
-                        )
-                        subs[k] = maybe_val
-                    else:
-                        subs[k] = float(v[0])
+        # ---- BUILD THE FINAL RATING OBJECT THAT MATCHES THE SPEC ---- #
+        def s(name: str) -> float:
+            return float(results.get(name, (0.0, 0))[0])
 
-            except Exception as e:
-                subs[k] = 0.0
-                print(f"[WARN] Failed to serialize {k}: {e}")
+        def l(name: str) -> float:
+            return float(results.get(name, (0.0, 0))[1]) / 1000.0  # convert ms → seconds
 
-        return {"net": net_score, "subs": subs, "latency_ms": net_latency}
+        return {
+            # REQUIRED top-level fields
+            "name": resource.get("name"),
+            "category": "model",
+
+            # Net score
+            "net_score": net_score,
+            "net_score_latency": total_latency / 1000.0,
+
+            # Individual metrics (in schema order)
+            "ramp_up_time": s("ramp_up_time"),
+            "ramp_up_time_latency": l("ramp_up_time"),
+
+            "bus_factor": s("bus_factor"),
+            "bus_factor_latency": l("bus_factor"),
+
+            "performance_claims": s("performance_claims"),
+            "performance_claims_latency": l("performance_claims"),
+
+            "license": s("license"),
+            "license_latency": l("license"),
+
+            "dataset_and_code_score": s("dataset_and_code_score"),
+            "dataset_and_code_score_latency": l("dataset_and_code_score"),
+
+            "dataset_quality": s("dataset_quality"),
+            "dataset_quality_latency": l("dataset_quality"),
+
+            "code_quality": s("code_quality"),
+            "code_quality_latency": l("code_quality"),
+
+            "reproducibility": s("reproducibility"),
+            "reproducibility_latency": l("reproducibility"),
+
+            "reviewedness": s("reviewedness"),
+            "reviewedness_latency": l("reviewedness"),
+
+            # Spec requires `tree_score` — convert from internal `treescore`
+            "tree_score": s("treescore"),
+            "tree_score_latency": l("treescore"),
+
+            "size_score": s("size_score"),
+            "size_score_latency": l("size_score"),
+        }
+
