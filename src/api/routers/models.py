@@ -420,108 +420,101 @@ def artifact_by_name(name: str):
 # -----------------------
 
 
-@router.get("/artifact/model/{id}/rate", response_model=ModelRating)
-def model_artifact_rate(id: str = Path(...)):
+@router.get("/artifact/model/{id}/rate")
+def model_artifact_rate(id: str):
+    """
+    Compute and return a full ModelRating for an artifact.
+    Conforms exactly to the Phase 2 OpenAPI specification.
+    """
+    # 1. Fetch artifact
     item = _registry.get(id)
-
     if not item:
-        raise HTTPException(status_code=404, detail="Artifact not found")
+        raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
-    metadata = item.get("metadata") or {}
+    # Registry may return a dict or Pydantic object
+    if isinstance(item, dict):
+        name = item.get("name")
+        url = item.get("url")
+        metadata = item.get("metadata", {})
+    else:
+        name = item.name
+        url = item.url
+        metadata = item.metadata or {}
 
-    # --- 1. Attempt to Read from Cache (Old Version Logic) ---
+    if not url:
+        raise HTTPException(
+            status_code=400,
+            detail="Artifact is missing a source URL for rating."
+        )
 
-    def g(name: str, alt: str = None) -> float:
-        """Safely retrieve a score/latency value from metadata as a float."""
-        val = metadata.get(name) or metadata.get(alt) if alt else None
-        try:
-            return float(val)
-        except:
-            return 0.0
-
-    cached_net_score = g("net_score", "score")
-
-    # If the score is found and non-zero, return the cached data immediately.
-    # This ensures the test passes quickly and reliably.
-    if cached_net_score > 0.0:
-        logger.info(f"Returning cached rating for artifact ID: {id}")
-        size_metric = metadata.get("size_score") or metadata.get("size") or {}
-        return {
-            "net_score": cached_net_score,
-            "net_score_latency": g("net_score_latency"),
-            "bus_factor": g("bus_factor"),
-            "bus_factor_latency": g("bus_factor_latency"),
-            "ramp_up_time": g("ramp_up_time"),
-            "ramp_up_time_latency": g("ramp_up_time_latency"),
-            "size_score": {
-                "raspberry_pi": float(size_metric.get("raspberry_pi", 0.0)),
-                "jetson_nano": float(size_metric.get("jetson_nano", 0.0)),
-                "desktop_gpu": float(size_metric.get("desktop_gpu", 0.0)),
-                "mobile_gpu": float(size_metric.get("mobile_gpu", 0.0)),
-            },
-            "size_score_latency": g("size_score_latency"),
-            "parents": extract_parents_from_resource(metadata),
-            "parents_latency": g("parents_latency"),
-        }
-
-    # --- 2. Live Calculation Fallback (New Version Logic) ---
-
-    # If no score or score is 0.0, we proceed to calculate it live.
-    logger.info(f"Cached rating for artifact ID: {id} is missing or 0.0. Recalculating live.")
-
-    # Build the resource object (required for _scoring.rate())
+    # 2. Build resource object for scoring service
     resource = {
-        "name": item.get("name"),
-        "url": item.get("data", {}).get("url"),
+        "name": name,
+        "url": url,
         "github_url": metadata.get("github_url"),
-        # Add any other fields required by your scoring service
+        "local_path": None,
+        "skip_repo_metrics": False,
+        "category": "MODEL",
     }
 
-    try:
-        rating = _scoring.rate(resource)
-    except Exception as e:
-        logger.error(f"Scoring service failed for {id}: {e}")
-        # If calculation fails, we still return 0.0 for all scores instead of raising an error
-        return {
-            "net_score": 0.0, "net_score_latency": 0.0, "bus_factor": 0.0, "bus_factor_latency": 0.0,
-            "ramp_up_time": 0.0, "ramp_up_time_latency": 0.0, "size_score": {}, "size_score_latency": 0.0,
-            "parents": [], "parents_latency": 0.0,
-        }
+    # 3. Compute rating via scoring service
+    rating = _scoring.rate(resource)
 
+    # 4. Extract subs into individual fields as the spec requires
     subs = rating["subs"]
 
-    # --- 3. Construct Response and Update Cache ---
-
-    calculated_scores = {
-        "net_score": float(rating["score"]),
-        "net_score_latency": float(rating.get("latency_ms", 0.0)),
-        "bus_factor": float(subs.get("bus_factor", 0.0)),
-        "bus_factor_latency": float(subs.get("bus_factor_latency", 0.0)),
-        "ramp_up_time": float(subs.get("ramp_up_time", 0.0)),
-        "ramp_up_time_latency": float(subs.get("ramp_up_time_latency", 0.0)),
-        "size_score_latency": float(subs.get("size_score_latency", 0.0)),
-        "parents_latency": float(subs.get("parents_latency", 0.0)),
-    }
-    
+    # Pull size score sub-object (dict of device metrics)
     size_map = subs.get("size_score", {})
     size_score_struct = {
         "raspberry_pi": float(size_map.get("raspberry_pi", 0.0)),
         "jetson_nano": float(size_map.get("jetson_nano", 0.0)),
-        "desktop_gpu": float(size_map.get("desktop_gpu", 0.0)),
-        "mobile_gpu": float(size_map.get("mobile_gpu", 0.0)),
+        "desktop_pc": float(size_map.get("desktop_pc", 0.0)),
+        "aws_server": float(size_map.get("aws_server", 0.0)),
     }
-    
-    # Update the artifact's metadata in the registry (cache) for future fast lookups
-    # NOTE: Your registry service will need a method like `_registry.update_metadata(id, new_metadata)`
-    new_metadata = {**metadata, **calculated_scores, "size_score": size_score_struct}
-    _registry.update_metadata(id, new_metadata) # This line assumes you have an update method
 
-    # Return the newly calculated, fresh score
-    return {
-        **calculated_scores,
+    # 5. Reassemble into EXACT ModelRating response schema
+    response = {
+        "name": name,
+        "category": "model",  # spec requires lowercase
+        "net_score": float(rating["net"]),
+        "net_score_latency": float(rating["latency_ms"]),
+
+        "ramp_up_time": float(subs.get("ramp_up_time", 0.0)),
+        "ramp_up_time_latency": float(subs.get("ramp_up_time_latency", 0.0)),
+
+        "bus_factor": float(subs.get("bus_factor", 0.0)),
+        "bus_factor_latency": float(subs.get("bus_factor_latency", 0.0)),
+
+        "performance_claims": float(subs.get("performance_claims", 0.0)),
+        "performance_claims_latency": float(subs.get("performance_claims_latency", 0.0)),
+
+        "license": float(subs.get("license", 0.0)),
+        "license_latency": float(subs.get("license_latency", 0.0)),
+
+        "dataset_and_code_score": float(subs.get("dataset_and_code_score", 0.0)),
+        "dataset_and_code_score_latency": float(subs.get("dataset_and_code_score_latency", 0.0)),
+
+        "dataset_quality": float(subs.get("dataset_quality", 0.0)),
+        "dataset_quality_latency": float(subs.get("dataset_quality_latency", 0.0)),
+
+        "code_quality": float(subs.get("code_quality", 0.0)),
+        "code_quality_latency": float(subs.get("code_quality_latency", 0.0)),
+
+        "reproducibility": float(subs.get("reproducibility", 0.0)),
+        "reproducibility_latency": float(subs.get("reproducibility_latency", 0.0)),
+
+        "reviewedness": float(subs.get("reviewedness", 0.0)),
+        "reviewedness_latency": float(subs.get("reviewedness_latency", 0.0)),
+
+        "tree_score": float(subs.get("tree_score", 0.0)),
+        "tree_score_latency": float(subs.get("tree_score_latency", 0.0)),
+
         "size_score": size_score_struct,
-        "parents": extract_parents_from_resource(resource), # Or subs.get("parents") depending on scoring service output
+        "size_score_latency": float(subs.get("size_score_latency", 0.0)),
     }
+
+    return response
+
 
 
 @router.get("/artifact/model/{id}/lineage")
