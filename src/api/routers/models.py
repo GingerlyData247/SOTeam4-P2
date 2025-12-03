@@ -6,11 +6,12 @@ import io
 import time
 import zipfile
 import logging
+import re
 from typing import Any, Dict, List, Literal, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
-from fastapi import APIRouter, Body, HTTPException, Path, Query, Response
+from fastapi import APIRouter, Body, HTTPException, Path, Query, Response,Depends
 from pydantic import BaseModel
 
 from ...schemas.models import ModelCreate
@@ -419,67 +420,99 @@ def artifact_by_name(name: str):
 
 @router.get("/artifact/model/{id}/rate")
 def model_artifact_rate(id: str):
-    logger.info("GET /artifact/model/%s/rate", id)
+    """
+    Compute and return a full ModelRating for an artifact.
+    Conforms exactly to the Phase 2 OpenAPI specification.
+    """
+    # 1. Fetch artifact
     item = _registry.get(id)
     if not item:
-        logger.warning("model_artifact_rate: artifact not found: id=%s", id)
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
-    meta = item.get("metadata") or {}
 
-    def g(name: str, alt: Optional[str] = None, default: float = 0.0) -> float:
-        """
-        Safely pull a float metric from metadata, trying a primary key and
-        an optional fallback key.
-        """
-        keys = (name, alt) if alt else (name,)
-        for k in keys:
-            if not k:
-                continue
-            v = meta.get(k)
-            if isinstance(v, (int, float)):
-                return float(v)
-        return default
+    # Registry may return a dict or Pydantic object
+    if isinstance(item, dict):
+        name = item.get("name")
+        url = item.get("url")
+        metadata = item.get("metadata", {})
+    else:
+        name = item.name
+        url = item.url
+        metadata = item.metadata or {}
 
-    size_metric = meta.get("size_score") or meta.get("size") or {}
-    size_latency = g("size_score_latency", alt="size_latency")
-    tree_score = g("tree_score", alt="treescore")
-    tree_latency = g("tree_score_latency", alt="treescore_latency")
+    if not url:
+        raise HTTPException(
+            status_code=400,
+            detail="Artifact is missing a source URL for rating."
+        )
 
-    resp = {
-        "name": meta.get("name") or item["name"],
-        "category": meta.get("category", ""),
-        "net_score": g("net_score"),
-        "net_score_latency": g("net_score_latency"),
-        "ramp_up_time": g("ramp_up_time"),
-        "ramp_up_time_latency": g("ramp_up_time_latency"),
-        "bus_factor": g("bus_factor"),
-        "bus_factor_latency": g("bus_factor_latency"),
-        "performance_claims": g("performance_claims"),
-        "performance_claims_latency": g("performance_claims_latency"),
-        "license": g("license"),
-        "license_latency": g("license_latency"),
-        "dataset_and_code_score": g("dataset_and_code_score"),
-        "dataset_and_code_score_latency": g("dataset_and_code_score_latency"),
-        "dataset_quality": g("dataset_quality"),
-        "dataset_quality_latency": g("dataset_quality_latency"),
-        "code_quality": g("code_quality"),
-        "code_quality_latency": g("code_quality_latency"),
-        "reproducibility": g("reproducibility"),
-        "reproducibility_latency": g("reproducibility_latency"),
-        "reviewedness": g("reviewedness"),
-        "reviewedness_latency": g("reviewedness_latency"),
-        "tree_score": tree_score,
-        "tree_score_latency": tree_latency,
-        "size_score": {
-            "raspberry_pi": float(size_metric.get("raspberry_pi", 0.0)),
-            "jetson_nano": float(size_metric.get("jetson_nano", 0.0)),
-            "desktop_pc": float(size_metric.get("desktop_pc", 0.0)),
-            "aws_server": float(size_metric.get("aws_server", 0.0)),
-        },
-        "size_score_latency": size_latency,
+    # 2. Build resource object for scoring service
+    resource = {
+        "name": name,
+        "url": url,
+        "github_url": metadata.get("github_url"),
+        "local_path": None,
+        "skip_repo_metrics": False,
+        "category": "MODEL",
     }
-    logger.info("model_artifact_rate: id=%s net_score=%s", id, resp["net_score"])
-    return resp
+
+    # 3. Compute rating via scoring service
+    rating = _scoring.rate(resource)
+
+    # 4. Extract subs into individual fields as the spec requires
+    subs = rating["subs"]
+
+    # Pull size score sub-object (dict of device metrics)
+    size_map = subs.get("size_score", {})
+    size_score_struct = {
+        "raspberry_pi": float(size_map.get("raspberry_pi", 0.0)),
+        "jetson_nano": float(size_map.get("jetson_nano", 0.0)),
+        "desktop_pc": float(size_map.get("desktop_pc", 0.0)),
+        "aws_server": float(size_map.get("aws_server", 0.0)),
+    }
+
+    # 5. Reassemble into EXACT ModelRating response schema
+    response = {
+        "name": name,
+        "category": "model",  # spec requires lowercase
+        "net_score": float(rating["net"]),
+        "net_score_latency": float(rating["latency_ms"]),
+
+        "ramp_up_time": float(subs.get("ramp_up_time", 0.0)),
+        "ramp_up_time_latency": float(subs.get("ramp_up_time_latency", 0.0)),
+
+        "bus_factor": float(subs.get("bus_factor", 0.0)),
+        "bus_factor_latency": float(subs.get("bus_factor_latency", 0.0)),
+
+        "performance_claims": float(subs.get("performance_claims", 0.0)),
+        "performance_claims_latency": float(subs.get("performance_claims_latency", 0.0)),
+
+        "license": float(subs.get("license", 0.0)),
+        "license_latency": float(subs.get("license_latency", 0.0)),
+
+        "dataset_and_code_score": float(subs.get("dataset_and_code_score", 0.0)),
+        "dataset_and_code_score_latency": float(subs.get("dataset_and_code_score_latency", 0.0)),
+
+        "dataset_quality": float(subs.get("dataset_quality", 0.0)),
+        "dataset_quality_latency": float(subs.get("dataset_quality_latency", 0.0)),
+
+        "code_quality": float(subs.get("code_quality", 0.0)),
+        "code_quality_latency": float(subs.get("code_quality_latency", 0.0)),
+
+        "reproducibility": float(subs.get("reproducibility", 0.0)),
+        "reproducibility_latency": float(subs.get("reproducibility_latency", 0.0)),
+
+        "reviewedness": float(subs.get("reviewedness", 0.0)),
+        "reviewedness_latency": float(subs.get("reviewedness_latency", 0.0)),
+
+        "tree_score": float(subs.get("tree_score", 0.0)),
+        "tree_score_latency": float(subs.get("tree_score_latency", 0.0)),
+
+        "size_score": size_score_struct,
+        "size_score_latency": float(subs.get("size_score_latency", 0.0)),
+    }
+
+    return response
+
 
 
 @router.get("/artifact/model/{id}/lineage")
@@ -909,9 +942,33 @@ def artifact_create(
 # -----------------------
 
 
-@router.get("/artifacts/{artifact_type}/{id}", response_model=Artifact)
-def artifact_get(artifact_type: ArtifactTypeLiteral, id: str):
+@router.get(
+    "/artifacts/{artifact_type}/{id}",
+    response_model=Artifact,
+    summary="Interact with the artifact with this id. (BASELINE)",
+    description="Return this artifact.",
+    operation_id="ArtifactRetrieve",
+)
+def artifact_get(
+    artifact_type: ArtifactTypeLiteral = Path(..., description="Type of artifact to fetch"),
+    id: str = Path(..., description="ID of artifact to fetch"),
+):
+    # Validate artifact_type against allowed values
+    if str(artifact_type).lower() not in ("model", "dataset", "code"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid artifact_type '{artifact_type}', must be one of: model, dataset, code.",
+        )
+
+    # Validate artifact ID format (numeric string, 1-12 digits as an example)
+    if not re.fullmatch(r"\d{1,12}", id):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid artifact ID '{id}', must be a numeric string (1-12 digits)."
+        )
+
     logger.info("GET /artifacts/%s/%s", artifact_type, id)
+
     item = _registry.get(id)
     if not item:
         logger.warning(
@@ -924,7 +981,7 @@ def artifact_get(artifact_type: ArtifactTypeLiteral, id: str):
     if stored_type not in ("model", "dataset", "code"):
         stored_type = artifact_type
 
-    # Prefer top-level source_uri (from ModelCreate), fall back to any metadata copy.
+    # Prefer top-level source_uri (from ModelCreate), fallback to any metadata copy
     source_uri = item.get("source_uri") or meta.get("source_uri")
 
     if stored_type == "model":
@@ -948,6 +1005,7 @@ def artifact_get(artifact_type: ArtifactTypeLiteral, id: str):
         ),
         data=ArtifactData(url=url, download_url=download_url),
     )
+
 
 
 @router.put("/artifacts/{artifact_type}/{id}", response_model=Artifact)
