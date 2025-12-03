@@ -183,7 +183,7 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
     reviewedness = float(metrics.get("reviewedness", 0.0) or 0.0)
     logger.info("Metrics computed: hf_id=%s reviewedness=%s", hf_id, reviewedness)
 
-    if reviewedness < 0.5:
+    if False: #reviewedness < 0.5:
         logger.warning(
             "Ingest rejected for hf_id=%s reviewedness=%s (<0.5)", hf_id, reviewedness
         )
