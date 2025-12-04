@@ -426,17 +426,16 @@ def model_artifact_rate(id: str):
     Compute and return a full ModelRating for an artifact.
     Matches the Phase 2 OpenAPI specification.
     """
-    # 1. Fetch artifact
+
+    # 1. Fetch artifact from registry
     item = _registry.get(id)
     if not item:
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
-    # Registry may return a dict or Pydantic object
+    # Registry may store dict OR Pydantic objects
     if isinstance(item, dict):
         name = item.get("name")
         metadata = item.get("metadata", {}) or {}
-
-        # Preferred source URL comes from metadata["source_uri"]
         url = metadata.get("source_uri") or f"https://huggingface.co/{name}"
     else:
         name = item.name
@@ -449,7 +448,7 @@ def model_artifact_rate(id: str):
             detail="Artifact is missing a source URL for rating."
         )
 
-    # 2. Build resource object for scoring service
+    # 2. Build resource for scoring service
     resource = {
         "name": name,
         "url": url,
@@ -459,34 +458,66 @@ def model_artifact_rate(id: str):
         "category": "MODEL",
     }
 
-    # 3. Compute rating using your UPDATED scoring service
+    # 3. Score the model
     rating = _scoring.rate(resource)
 
-    # ----------------------------
-    # NEW: scoring.py returns FLAT KEYS, not "subs"
-    # ----------------------------
-
+    # ----------------------
+    # SAFE GETTERS (flat keys)
+    # ----------------------
     def g(key: str, default=0.0):
-        """Safe getter for numeric metrics."""
-        val = rating.get(key, default)
-        return float(val) if isinstance(val, (int, float)) else default
+        """Get numeric metric safely."""
+        v = rating.get(key, default)
+        return float(v) if isinstance(v, (int, float)) else default
 
     def gl(key: str):
-        """Safe getter for latency metrics (already converted to seconds)."""
-        val = rating.get(key, 0.0)
-        return float(val) if isinstance(val, (int, float)) else 0.0
+        """Get latency (already seconds in your ScoringService)."""
+        v = rating.get(key, 0.0)
+        return float(v) if isinstance(v, (int, float)) else 0.0
 
-    # Size score is a dict (raspberry_pi, jetson_nano, desktop_pc, aws_server)
-    size_map = rating.get("size_score", {}) or {}
-    size_score_struct = {
-        "raspberry_pi": float(size_map.get("raspberry_pi", 0.0)),
-        "jetson_nano": float(size_map.get("jetson_nano", 0.0)),
-        "desktop_pc": float(size_map.get("desktop_pc", 0.0)),
-        "aws_server": float(size_map.get("aws_server", 0.0)),
-    }
+    # ----------------------
+    # 🔥 Robust size_score handler
+    # Supports:
+    #   - dict format {raspberry_pi: ..., jetson_nano: ...}
+    #   - tuple format (score, latency)
+    #   - invalid formats
+    # ----------------------
+    raw_size = rating.get("size_score", {})
 
-    # 4. Construct EXACT ModelRating response
-    response = {
+    if isinstance(raw_size, dict):
+        # Phase 2 correct format
+        size_score_struct = {
+            "raspberry_pi": float(raw_size.get("raspberry_pi", 0.0)),
+            "jetson_nano": float(raw_size.get("jetson_nano", 0.0)),
+            "desktop_pc": float(raw_size.get("desktop_pc", 0.0)),
+            "aws_server": float(raw_size.get("aws_server", 0.0)),
+        }
+        size_latency = gl("size_score_latency")
+
+    elif isinstance(raw_size, (list, tuple)) and len(raw_size) >= 2:
+        # Legacy Phase 1–style: (single_score, latency)
+        score_val = float(raw_size[0])
+        size_score_struct = {
+            "raspberry_pi": score_val,
+            "jetson_nano": score_val,
+            "desktop_pc": score_val,
+            "aws_server": score_val,
+        }
+        size_latency = float(raw_size[1]) if isinstance(raw_size[1], (int, float)) else 0.0
+
+    else:
+        # Fallback (never crash)
+        size_score_struct = {
+            "raspberry_pi": 0.0,
+            "jetson_nano": 0.0,
+            "desktop_pc": 0.0,
+            "aws_server": 0.0,
+        }
+        size_latency = 0.0
+
+    # ----------------------
+    # 4. FINAL SPEC-COMPATIBLE RESPONSE
+    # ----------------------
+    return {
         "name": name,
         "category": "model",
 
@@ -520,15 +551,14 @@ def model_artifact_rate(id: str):
         "reviewedness": g("reviewedness"),
         "reviewedness_latency": gl("reviewedness_latency"),
 
-        # tree_score = internal "treescore"
+        # Internal metric is "treescore", external is "tree_score"
         "tree_score": g("tree_score"),
         "tree_score_latency": gl("tree_score_latency"),
 
         "size_score": size_score_struct,
-        "size_score_latency": gl("size_score_latency"),
+        "size_score_latency": size_latency,
     }
 
-    return response
 
 
 
