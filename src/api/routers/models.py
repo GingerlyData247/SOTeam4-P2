@@ -434,18 +434,23 @@ def model_artifact_rate(id: str):
     # Registry may return a dict or Pydantic object
     if isinstance(item, dict):
         name = item.get("name")
-        url = item.get("url")
-        metadata = item.get("metadata", {})
+        metadata = item.get("metadata", {}) or {}
+
+        # FIX: Get URL from metadata["source_uri"]
+        url = metadata.get("source_uri") or f"https://huggingface.co/{name}"
     else:
         name = item.name
-        url = item.url
         metadata = item.metadata or {}
+
+        # FIX: Same fix for Pydantic cases
+        url = getattr(item, "source_uri", None) or metadata.get("source_uri") or f"https://huggingface.co/{name}"
 
     if not url:
         raise HTTPException(
             status_code=400,
             detail="Artifact is missing a source URL for rating."
         )
+
 
     # 2. Build resource object for scoring service
     resource = {
