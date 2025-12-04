@@ -424,7 +424,7 @@ def artifact_by_name(name: str):
 def model_artifact_rate(id: str):
     """
     Compute and return a full ModelRating for an artifact.
-    Conforms exactly to the Phase 2 OpenAPI specification.
+    Matches the Phase 2 OpenAPI specification.
     """
     # 1. Fetch artifact
     item = _registry.get(id)
@@ -436,13 +436,11 @@ def model_artifact_rate(id: str):
         name = item.get("name")
         metadata = item.get("metadata", {}) or {}
 
-        # FIX: Get URL from metadata["source_uri"]
+        # Preferred source URL comes from metadata["source_uri"]
         url = metadata.get("source_uri") or f"https://huggingface.co/{name}"
     else:
         name = item.name
         metadata = item.metadata or {}
-
-        # FIX: Same fix for Pydantic cases
         url = getattr(item, "source_uri", None) or metadata.get("source_uri") or f"https://huggingface.co/{name}"
 
     if not url:
@@ -450,7 +448,6 @@ def model_artifact_rate(id: str):
             status_code=400,
             detail="Artifact is missing a source URL for rating."
         )
-
 
     # 2. Build resource object for scoring service
     resource = {
@@ -462,14 +459,25 @@ def model_artifact_rate(id: str):
         "category": "MODEL",
     }
 
-    # 3. Compute rating via scoring service
+    # 3. Compute rating using your UPDATED scoring service
     rating = _scoring.rate(resource)
 
-    # 4. Extract subs into individual fields as the spec requires
-    subs = rating["subs"]
+    # ----------------------------
+    # NEW: scoring.py returns FLAT KEYS, not "subs"
+    # ----------------------------
 
-    # Pull size score sub-object (dict of device metrics)
-    size_map = subs.get("size_score", {})
+    def g(key: str, default=0.0):
+        """Safe getter for numeric metrics."""
+        val = rating.get(key, default)
+        return float(val) if isinstance(val, (int, float)) else default
+
+    def gl(key: str):
+        """Safe getter for latency metrics (already converted to seconds)."""
+        val = rating.get(key, 0.0)
+        return float(val) if isinstance(val, (int, float)) else 0.0
+
+    # Size score is a dict (raspberry_pi, jetson_nano, desktop_pc, aws_server)
+    size_map = rating.get("size_score", {}) or {}
     size_score_struct = {
         "raspberry_pi": float(size_map.get("raspberry_pi", 0.0)),
         "jetson_nano": float(size_map.get("jetson_nano", 0.0)),
@@ -477,48 +485,51 @@ def model_artifact_rate(id: str):
         "aws_server": float(size_map.get("aws_server", 0.0)),
     }
 
-    # 5. Reassemble into EXACT ModelRating response schema
+    # 4. Construct EXACT ModelRating response
     response = {
         "name": name,
-        "category": "model",  # spec requires lowercase
-        "net_score": float(rating["net"]),
-        "net_score_latency": float(rating["latency_ms"]),
+        "category": "model",
 
-        "ramp_up_time": float(subs.get("ramp_up_time", 0.0)),
-        "ramp_up_time_latency": float(subs.get("ramp_up_time_latency", 0.0)),
+        "net_score": g("net_score"),
+        "net_score_latency": gl("net_score_latency"),
 
-        "bus_factor": float(subs.get("bus_factor", 0.0)),
-        "bus_factor_latency": float(subs.get("bus_factor_latency", 0.0)),
+        "ramp_up_time": g("ramp_up_time"),
+        "ramp_up_time_latency": gl("ramp_up_time_latency"),
 
-        "performance_claims": float(subs.get("performance_claims", 0.0)),
-        "performance_claims_latency": float(subs.get("performance_claims_latency", 0.0)),
+        "bus_factor": g("bus_factor"),
+        "bus_factor_latency": gl("bus_factor_latency"),
 
-        "license": float(subs.get("license", 0.0)),
-        "license_latency": float(subs.get("license_latency", 0.0)),
+        "performance_claims": g("performance_claims"),
+        "performance_claims_latency": gl("performance_claims_latency"),
 
-        "dataset_and_code_score": float(subs.get("dataset_and_code_score", 0.0)),
-        "dataset_and_code_score_latency": float(subs.get("dataset_and_code_score_latency", 0.0)),
+        "license": g("license"),
+        "license_latency": gl("license_latency"),
 
-        "dataset_quality": float(subs.get("dataset_quality", 0.0)),
-        "dataset_quality_latency": float(subs.get("dataset_quality_latency", 0.0)),
+        "dataset_and_code_score": g("dataset_and_code_score"),
+        "dataset_and_code_score_latency": gl("dataset_and_code_score_latency"),
 
-        "code_quality": float(subs.get("code_quality", 0.0)),
-        "code_quality_latency": float(subs.get("code_quality_latency", 0.0)),
+        "dataset_quality": g("dataset_quality"),
+        "dataset_quality_latency": gl("dataset_quality_latency"),
 
-        "reproducibility": float(subs.get("reproducibility", 0.0)),
-        "reproducibility_latency": float(subs.get("reproducibility_latency", 0.0)),
+        "code_quality": g("code_quality"),
+        "code_quality_latency": gl("code_quality_latency"),
 
-        "reviewedness": float(subs.get("reviewedness", 0.0)),
-        "reviewedness_latency": float(subs.get("reviewedness_latency", 0.0)),
+        "reproducibility": g("reproducibility"),
+        "reproducibility_latency": gl("reproducibility_latency"),
 
-        "tree_score": float(subs.get("tree_score", 0.0)),
-        "tree_score_latency": float(subs.get("tree_score_latency", 0.0)),
+        "reviewedness": g("reviewedness"),
+        "reviewedness_latency": gl("reviewedness_latency"),
+
+        # tree_score = internal "treescore"
+        "tree_score": g("tree_score"),
+        "tree_score_latency": gl("tree_score_latency"),
 
         "size_score": size_score_struct,
-        "size_score_latency": float(subs.get("size_score_latency", 0.0)),
+        "size_score_latency": gl("size_score_latency"),
     }
 
     return response
+
 
 
 
