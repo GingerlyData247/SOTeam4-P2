@@ -263,7 +263,7 @@
           if (!downloadUrl) {
             try {
               const getRes = await fetch(
-                `${API_BASE}/api/artifact/model/${encodeURIComponent(artifactId)}`
+                `${API_BASE}/api/artifacts/model/${encodeURIComponent(artifactId)}`
               );
               if (getRes.ok) {
                 const full = await getRes.json();
@@ -614,6 +614,7 @@
     </script>
   </body>
 </html>
+
 
 
 
