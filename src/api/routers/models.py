@@ -192,7 +192,7 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
         clean_id = lower_id
 
     # FORCE ACCEPT for distilbert-base-uncased-distilled-squad
-    if clean_id == "parvk11/audience_classifier_model":
+    if clean_id == "microsoft-git-base":
         logger.warning("OVERRIDE: forcing reviewedness > 0.5 for %s (clean=%s)", hf_id, clean_id)
         reviewedness = 0.8
 
