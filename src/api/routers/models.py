@@ -483,8 +483,10 @@ def model_artifact_rate(id: str):
     # ----------------------
     raw_size = rating.get("size_score", {})
 
-    if isinstance(raw_size, dict):
-        # Phase 2 correct format
+    # CASE 1 — Phase 2 correct dict of devices
+    if isinstance(raw_size, dict) and \
+        ("raspberry_pi" in raw_size or "jetson_nano" in raw_size):
+        
         size_score_struct = {
             "raspberry_pi": float(raw_size.get("raspberry_pi", 0.0)),
             "jetson_nano": float(raw_size.get("jetson_nano", 0.0)),
@@ -493,19 +495,34 @@ def model_artifact_rate(id: str):
         }
         size_latency = gl("size_score_latency")
 
-    elif isinstance(raw_size, (list, tuple)) and len(raw_size) >= 2:
-        # Legacy Phase 1–style: (single_score, latency)
-        score_val = float(raw_size[0])
+    # CASE 2 — Metric returned { "score": X, "latency": Y }
+    elif isinstance(raw_size, dict) and "score" in raw_size:
+        score_val = float(raw_size["score"])
         size_score_struct = {
             "raspberry_pi": score_val,
             "jetson_nano": score_val,
             "desktop_pc": score_val,
             "aws_server": score_val,
         }
-        size_latency = float(raw_size[1]) if isinstance(raw_size[1], (int, float)) else 0.0
+        size_latency = float(raw_size.get("latency", 0.0))
 
+    # CASE 3 — Legacy tuple (score, latency_ms)
+    elif isinstance(raw_size, (list, tuple)) and len(raw_size) >= 2 \
+         and isinstance(raw_size[0], (int, float)):
+
+        score_val = float(raw_size[0])
+        latency_ms = raw_size[1]
+
+        size_score_struct = {
+            "raspberry_pi": score_val,
+            "jetson_nano": score_val,
+            "desktop_pc": score_val,
+            "aws_server": score_val,
+        }
+        size_latency = float(latency_ms) / 1000.0
+
+    # FALLBACK — never crash
     else:
-        # Fallback (never crash)
         size_score_struct = {
             "raspberry_pi": 0.0,
             "jetson_nano": 0.0,
