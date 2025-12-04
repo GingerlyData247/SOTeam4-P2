@@ -234,7 +234,7 @@
           }
 
           const artifact = await createRes.json();
-          const artifactId = artifact?.metadata?.id;
+          const artifactId = artifact?.id;
 
           if (!artifactId) {
             out.textContent = "Artifact created but no id returned.";
@@ -614,6 +614,7 @@
     </script>
   </body>
 </html>
+
 
 
 
