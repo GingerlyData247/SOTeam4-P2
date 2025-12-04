@@ -255,7 +255,8 @@ class ScoringService:
             "tree_score": s("treescore"),
             "tree_score_latency": l("treescore"),
 
-            "size_score": s("size_score"),
+            # size_score is a dict, not a numeric submetric — return as-is
+            "size_score": results.get("size_score", {}),
             "size_score_latency": l("size_score"),
         }
 
