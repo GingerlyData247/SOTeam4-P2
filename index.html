@@ -212,7 +212,7 @@
 
         try {
           // 1) Register artifact via POST /artifact/model
-          const createRes = await fetch(`${API_BASE}/artifact/model`, {
+          const createRes = await fetch(`${API_BASE}/api/artifact/model`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
@@ -245,7 +245,7 @@
           let rating = null;
           try {
             const rateRes = await fetch(
-              `${API_BASE}/artifact/model/${encodeURIComponent(artifactId)}/rate`
+              `${API_BASE}/api/artifact/model/${encodeURIComponent(artifactId)}/rate`
             );
             if (rateRes.ok) {
               rating = await rateRes.json();
@@ -263,7 +263,7 @@
           if (!downloadUrl) {
             try {
               const getRes = await fetch(
-                `${API_BASE}/artifact/model/${encodeURIComponent(artifactId)}`
+                `${API_BASE}/api/artifact/model/${encodeURIComponent(artifactId)}`
               );
               if (getRes.ok) {
                 const full = await getRes.json();
@@ -313,7 +313,7 @@
 
         try {
           // POST /artifacts with [{ name: "*", types: ["model"] }]
-          const res = await fetch(`${API_BASE}/artifacts`, {
+          const res = await fetch(`${API_BASE}/api/artifacts`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify([
@@ -359,7 +359,7 @@
         display.textContent = "Loading...";
 
         try {
-          const res = await fetch(`${API_BASE}/artifacts`, {
+          const res = await fetch(`${API_BASE}/api/artifacts`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify([
@@ -404,7 +404,7 @@
         display.textContent = "Searching...";
 
         try {
-          const res = await fetch(`${API_BASE}/artifact/byRegEx`, {
+          const res = await fetch(`${API_BASE}/api/artifact/byRegEx`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ regex })
@@ -445,7 +445,7 @@
         try {
           // Spec endpoint: GET /artifact/model/{id}/lineage
           const res = await fetch(
-            `${API_BASE}/artifact/model/${encodeURIComponent(artifactId)}/lineage`
+            `${API_BASE}/api/artifact/model/${encodeURIComponent(artifactId)}/lineage`
           );
           if (!res.ok) {
             box.textContent = `Error loading lineage (${res.status})`;
@@ -527,7 +527,7 @@
         if (!confirm("Reset registry?")) return;
 
         try {
-          const res = await fetch(`${API_BASE}/reset`, { method: "DELETE" });
+          const res = await fetch(`${API_BASE}/api/reset`, { method: "DELETE" });
           if (!res.ok) {
             alert(`Reset failed (${res.status})`);
             return;
@@ -569,7 +569,7 @@
 
           try {
             const response = await fetch(
-              `${API_BASE}/artifact/model/${encodeURIComponent(
+              `${API_BASE}/api/artifact/model/${encodeURIComponent(
                 modelId
               )}/license-check`,
               {
@@ -614,3 +614,4 @@
     </script>
   </body>
 </html>
+
