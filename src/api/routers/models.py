@@ -163,12 +163,18 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
     hf_url = f"https://huggingface.co/{hf_id}"
     logger.info("Normalized HF id: hf_id=%s hf_url=%s", hf_id, hf_url)
 
+    # -------------------------
+    # Fetch HF license
+    # -------------------------
     try:
         hf_license = _fetch_hf_license(hf_id)
     except Exception as e:
         logger.warning("HF license fetch failed for hf_id=%s error=%s", hf_id, e)
         hf_license = ""
 
+    # -------------------------
+    # Compute metrics
+    # -------------------------
     base_resource = {
         "name": hf_id,
         "url": hf_url,
@@ -181,9 +187,10 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
     logger.info("Computing metrics for hf_id=%s", hf_id)
     metrics = compute_metrics_for_model(base_resource)
     reviewedness = float(metrics.get("reviewedness", 0.0) or 0.0)
-    
+
     logger.info("Metrics computed: hf_id=%s reviewedness=%s", hf_id, reviewedness)
 
+    # Reviewedness gate
     if reviewedness < 0.5:
         logger.warning(
             "Ingest rejected for hf_id=%s reviewedness=%s (<0.5)", hf_id, reviewedness
@@ -193,6 +200,9 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
             detail=f"Ingest rejected: reviewedness={reviewedness:.2f} < 0.50",
         )
 
+    # -------------------------
+    # Enrichment + parents (lineage)
+    # -------------------------
     try:
         enriched = _build_hf_resource(hf_id)
         parents = extract_parents_from_resource(enriched)
@@ -209,6 +219,9 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
     metrics["parents"] = parents
     metrics["license"] = hf_license
 
+    # -------------------------
+    # Registry create
+    # -------------------------
     mc = ModelCreate(
         name=hf_id,
         version="1.0.0",
@@ -218,21 +231,36 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
         source_uri=hf_url,
     )
     created = _registry.create(mc)
+    model_id = created["id"]
+
     logger.info(
         "Registry create: hf_id=%s assigned_id=%s artifact_type=model",
         hf_id,
         created.get("id"),
     )
 
-    created.setdefault("metadata", {})
-    created["metadata"]["artifact_type"] = "model"
+    # ================================================================
+    # 🔥 FIX #1 — Re-fetch the actual stored object from the registry
+    #            because the returned "created" may be a shallow copy.
+    # ================================================================
+    reg_item = _registry.get(model_id)
+    if reg_item is None:
+        # This should never happen, but we guard just in case.
+        reg_item = created
 
-    model_id = created["id"]
+    reg_item.setdefault("metadata", {})
+    reg_item["metadata"]["artifact_type"] = "model"
 
+    # -------------------------
+    # Write minimal artifact ZIP
+    # -------------------------
     mem_zip = io.BytesIO()
     with zipfile.ZipFile(mem_zip, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("source_url.txt", hf_url)
 
+    # -------------------------
+    # Upload artifact to storage
+    # -------------------------
     try:
         key = f"artifacts/model/{model_id}.zip"
         _storage.put_bytes(key, mem_zip.getvalue())
@@ -251,9 +279,15 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
         )
         presigned = f"local://download/artifacts/model/{model_id}.zip"
 
-    created["metadata"]["download_url"] = presigned
+    # ================================================================
+    # 🔥 FIX #2 — Store download_url in registry entry itself
+    # ================================================================
+    reg_item["metadata"]["download_url"] = presigned
+
     logger.info("INGEST complete: hf_id=%s model_id=%s", hf_id, model_id)
-    return created
+
+    # Return the registry-stored object (always authoritative)
+    return reg_item
 
 
 # ---------------------------------------------------------------------------
