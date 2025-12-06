@@ -101,8 +101,12 @@ class RegistryService:
     # ------------------------------------------------------------------ #
     # GET / UPDATE / DELETE
     # ------------------------------------------------------------------ #
+    def get_artifact_by_id(self, id_: str) -> Optional[Dict[str, Any]]:
+        target_id = str(id_)
+        return next((m for m in self._models if str(m.get("id")) == target_id), None)
+
     def get(self, id_: str) -> Optional[Dict[str, Any]]:
-        return next((m for m in self._models if m["id"] == id_), None)
+        return self.get_artifact_by_id(id_)
 
     def update(self, id_: str, m) -> Optional[Dict[str, Any]]:
         for model in self._models:
