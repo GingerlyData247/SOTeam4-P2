@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
-from fastapi import APIRouter, Body, HTTPException, Path, Query, Response,Depends
+from fastapi import APIRouter, Body, HTTPException, Path, Query, Response, Depends
 from pydantic import BaseModel
 
 from ...schemas.models import ModelCreate
@@ -153,7 +153,7 @@ def _bytes_to_mb(n: int) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Ingest logic (UNCHANGED core behavior)
+# Ingest logic
 # ---------------------------------------------------------------------------
 
 
@@ -239,17 +239,14 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
         created.get("id"),
     )
 
-    # ================================================================
-    # 🔥 FIX #1 — Re-fetch the actual stored object from the registry
-    #            because the returned "created" may be a shallow copy.
-    # ================================================================
+    # Re-fetch the actual stored object from the registry (authoritative)
     reg_item = _registry.get(model_id)
     if reg_item is None:
-        # This should never happen, but we guard just in case.
         reg_item = created
 
     reg_item.setdefault("metadata", {})
-    reg_item["metadata"]["artifact_type"] = "model"
+    # SPEC-COMPLIANT: store type under "type"
+    reg_item["metadata"]["type"] = "model"
 
     # -------------------------
     # Write minimal artifact ZIP
@@ -279,14 +276,10 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
         )
         presigned = f"local://download/artifacts/model/{model_id}.zip"
 
-    # ================================================================
-    # 🔥 FIX #2 — Store download_url in registry entry itself
-    # ================================================================
     reg_item["metadata"]["download_url"] = presigned
 
     logger.info("INGEST complete: hf_id=%s model_id=%s", hf_id, model_id)
 
-    # Return the registry-stored object (always authoritative)
     return reg_item
 
 
@@ -328,7 +321,7 @@ def get_tracks():
 
 
 # =======================================================================
-# 🔥 STATIC ROUTES FIRST
+# STATIC ROUTES FIRST
 # =======================================================================
 
 
@@ -338,7 +331,6 @@ def artifact_by_regex(body: ArtifactRegex):
 
     logger.info("POST /artifact/byRegEx: regex=%s", body.regex)
     try:
-        # MULTILINE so ^name$ matches a line containing the artifact name.
         pattern = re.compile(body.regex, flags=re.MULTILINE)
     except re.error as e:
         logger.warning("Invalid regex in /artifact/byRegEx: regex=%s error=%s", body.regex, e)
@@ -348,7 +340,7 @@ def artifact_by_regex(body: ArtifactRegex):
 
     def infer_type(entry: Dict[str, Any]) -> ArtifactTypeLiteral:
         meta = entry.get("metadata") or {}
-        t = str(meta.get("artifact_type") or "").lower()
+        t = str(meta.get("type") or "").lower()
         return t if t in ("model", "dataset", "code") else "model"
 
     matches: List[Dict[str, Any]] = []
@@ -405,65 +397,49 @@ def artifact_by_regex(body: ArtifactRegex):
 @router.get("/artifact/byName/{name:path}", response_model=List[ArtifactMetadata])
 def artifact_by_name(name: str):
     """
-    Match artifacts whose stored metadata.name EXACTLY equals the provided name
+    Match artifacts whose stored name EXACTLY equals the provided name
     (after simple strip()).
-
-    FIXED VERSION:
-    - Looks inside metadata.name instead of top-level m["name"]
-    - Allows ingest-constructed artifacts to be found correctly
-    - Fully aligns with OpenAPI spec + autograder expectations
     """
 
     raw_name = name
     name = name.strip()
     logger.info("GET /artifact/byName: raw_name=%s normalized_name=%s", raw_name, name)
 
-    matches: List[Dict[str, Any]] = []
-
-    for m in _registry._models:
-        meta = m.get("metadata") or {}
-        stored_name = (meta.get("name") or "").strip()
-
-        if stored_name == name:
-            matches.append(m)
+    all_items = list(_registry._models)
+    matches: List[Dict[str, Any]] = [
+        m for m in all_items if (m.get("name", "") or "").strip() == name
+    ]
 
     logger.info(
         "artifact_by_name: total_items=%d match_count=%d match_ids=%s",
-        len(_registry._models),
+        len(all_items),
         len(matches),
-        [m.get("metadata", {}).get("id") for m in matches],
+        [m.get("id") for m in matches],
     )
 
     if not matches:
         logger.warning("artifact_by_name: NO MATCH for name=%s", name)
         raise HTTPException(status_code=404, detail="No such artifact.")
 
-    # Sort by metadata.id (string or int)
+    def infer_type(entry: Dict[str, Any]) -> ArtifactTypeLiteral:
+        meta = entry.get("metadata") or {}
+        t = str(meta.get("type") or "").lower()
+        return t if t in ("model", "dataset", "code") else "model"
+
     try:
-        matches_sorted = sorted(matches, key=lambda x: int(x["metadata"]["id"]))
+        matches_sorted = sorted(matches, key=lambda x: int(x["id"]))
     except Exception:
-        matches_sorted = sorted(matches, key=lambda x: str(x["metadata"]["id"]))
+        matches_sorted = sorted(matches, key=lambda x: str(x["id"]))
 
-    # Build the spec-required ArtifactMetadata objects
-    response = []
-    for m in matches_sorted:
-        meta = m["metadata"]
-        art_type = meta.get("type") or meta.get("artifact_type") or "model"
-
-        response.append(
-            ArtifactMetadata(
-                name=meta["name"],
-                id=meta["id"],
-                type=art_type
-            )
-        )
-
+    response = [
+        ArtifactMetadata(name=m["name"], id=m["id"], type=infer_type(m))
+        for m in matches_sorted
+    ]
     logger.info(
         "artifact_by_name: response_count=%d response_ids=%s",
         len(response),
         [r.id for r in response],
     )
-
     return response
 
 
@@ -479,12 +455,10 @@ def model_artifact_rate(id: str):
     Matches the Phase 2 OpenAPI specification.
     """
 
-    # 1. Fetch artifact from registry
     item = _registry.get(id)
     if not item:
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
-    # Registry may store dict OR Pydantic objects
     if isinstance(item, dict):
         name = item.get("name")
         metadata = item.get("metadata", {}) or {}
@@ -500,7 +474,6 @@ def model_artifact_rate(id: str):
             detail="Artifact is missing a source URL for rating."
         )
 
-    # 2. Build resource for scoring service
     resource = {
         "name": name,
         "url": url,
@@ -510,35 +483,21 @@ def model_artifact_rate(id: str):
         "category": "MODEL",
     }
 
-    # 3. Score the model
     rating = _scoring.rate(resource)
 
-    # ----------------------
-    # SAFE GETTERS (flat keys)
-    # ----------------------
     def g(key: str, default=0.0):
-        """Get numeric metric safely."""
         v = rating.get(key, default)
         return float(v) if isinstance(v, (int, float)) else default
 
     def gl(key: str):
-        """Get latency (already seconds in your ScoringService)."""
         v = rating.get(key, 0.0)
         return float(v) if isinstance(v, (int, float)) else 0.0
 
-    # ----------------------
-    # 🔥 Robust size_score handler
-    # Supports:
-    #   - dict format {raspberry_pi: ..., jetson_nano: ...}
-    #   - tuple format (score, latency)
-    #   - invalid formats
-    # ----------------------
     raw_size = rating.get("size_score", {})
 
-    # CASE 1 — Phase 2 correct dict of devices
     if isinstance(raw_size, dict) and \
         ("raspberry_pi" in raw_size or "jetson_nano" in raw_size):
-        
+
         size_score_struct = {
             "raspberry_pi": float(raw_size.get("raspberry_pi", 0.0)),
             "jetson_nano": float(raw_size.get("jetson_nano", 0.0)),
@@ -547,7 +506,6 @@ def model_artifact_rate(id: str):
         }
         size_latency = gl("size_score_latency")
 
-    # CASE 2 — Metric returned { "score": X, "latency": Y }
     elif isinstance(raw_size, dict) and "score" in raw_size:
         score_val = float(raw_size["score"])
         size_score_struct = {
@@ -558,7 +516,6 @@ def model_artifact_rate(id: str):
         }
         size_latency = float(raw_size.get("latency", 0.0))
 
-    # CASE 3 — Legacy tuple (score, latency_ms)
     elif isinstance(raw_size, (list, tuple)) and len(raw_size) >= 2 \
          and isinstance(raw_size[0], (int, float)):
 
@@ -573,7 +530,6 @@ def model_artifact_rate(id: str):
         }
         size_latency = float(latency_ms) / 1000.0
 
-    # FALLBACK — never crash
     else:
         size_score_struct = {
             "raspberry_pi": 0.0,
@@ -583,9 +539,6 @@ def model_artifact_rate(id: str):
         }
         size_latency = 0.0
 
-    # ----------------------
-    # 4. FINAL SPEC-COMPATIBLE RESPONSE
-    # ----------------------
     return {
         "name": name,
         "category": "model",
@@ -620,16 +573,12 @@ def model_artifact_rate(id: str):
         "reviewedness": g("reviewedness"),
         "reviewedness_latency": gl("reviewedness_latency"),
 
-        # Internal metric is "treescore", external is "tree_score"
         "tree_score": g("tree_score"),
         "tree_score_latency": gl("tree_score_latency"),
 
         "size_score": size_score_struct,
         "size_score_latency": size_latency,
     }
-
-
-
 
 
 @router.get("/artifact/model/{id}/lineage")
@@ -737,10 +686,6 @@ def model_artifact_cost(id: str):
     meta = item.get("metadata") or {}
 
     def g(name: str, alt: Optional[str] = None, default: float = 0.0) -> float:
-        """
-        Safely return a float metric from metadata.
-        Tries primary key and optional fallback.
-        """
         keys = (name, alt) if alt else (name,)
         for k in keys:
             if not k:
@@ -754,28 +699,16 @@ def model_artifact_cost(id: str):
         "name": meta.get("name") or item["name"],
         "category": meta.get("category", "model"),
 
-        # GPU cost per hour
         "gpu_cost_hour": g("gpu_cost_hour", alt="gpu_cost"),
-
-        # GPU cost latency measurement
         "gpu_cost_latency": g("gpu_cost_latency"),
 
-        # CPU cost per hour
         "cpu_cost_hour": g("cpu_cost_hour", alt="cpu_cost"),
-
-        # CPU latency
         "cpu_cost_latency": g("cpu_cost_latency"),
 
-        # Memory cost hourly
         "memory_cost_hour": g("memory_cost_hour", alt="mem_cost_hour"),
-
-        # Memory latency
         "memory_cost_latency": g("memory_cost_latency"),
 
-        # Storage cost (monthly)
         "storage_cost_month": g("storage_cost_month", alt="storage_cost"),
-
-        # Storage latency
         "storage_cost_latency": g("storage_cost_latency"),
     }
 
@@ -806,11 +739,8 @@ def artifact_create(
         body.download_url,
     )
 
-    # Spec baseline: model ingest (Hugging Face) via /artifact/model
     if artifact_type == "model":
         created = _ingest_hf_core(body.url)
-        # If caller provided an explicit download_url, prefer it over our
-        # generated one, but only in metadata / response (do NOT touch ingest).
         if body.download_url:
             created.setdefault("metadata", {})
             created["metadata"]["download_url"] = body.download_url
@@ -833,10 +763,7 @@ def artifact_create(
             ),
         )
 
-    # Spec baseline: dataset & code support
-    # Spec baseline: dataset & code support
     if artifact_type in ("dataset", "code"):
-        # >>> PATCH START: prefer explicit name from the request <<<
         if hasattr(body, "name") and body.name:
             name = body.name.strip()
         else:
@@ -849,7 +776,6 @@ def artifact_create(
             body.url,
             name,
         )
-        # >>> PATCH END <<<
 
         mc = ModelCreate(
             name=name,
@@ -862,7 +788,8 @@ def artifact_create(
 
         created = _registry.create(mc)
         created.setdefault("metadata", {})
-        created["metadata"]["artifact_type"] = artifact_type
+        # SPEC-COMPLIANT: store type as "type"
+        created["metadata"]["type"] = artifact_type
 
         if body.download_url:
             created["metadata"]["download_url"] = body.download_url
@@ -874,7 +801,6 @@ def artifact_create(
                 download_url=created["metadata"].get("download_url"),
             ),
         )
-
 
     logger.warning("artifact_create: unsupported artifact_type=%s", artifact_type)
     raise HTTPException(status_code=400, detail="Unsupported artifact_type.")
@@ -896,14 +822,12 @@ def artifact_get(
     artifact_type: ArtifactTypeLiteral = Path(..., description="Type of artifact to fetch"),
     id: str = Path(..., description="ID of artifact to fetch"),
 ):
-    # Validate artifact_type against allowed values
     if str(artifact_type).lower() not in ("model", "dataset", "code"):
         raise HTTPException(
             status_code=400,
             detail=f"Invalid artifact_type '{artifact_type}', must be one of: model, dataset, code.",
         )
 
-    # Validate artifact ID format (numeric string, 1-12 digits as an example)
     if not re.fullmatch(r"\d{1,12}", id):
         raise HTTPException(
             status_code=400,
@@ -920,11 +844,10 @@ def artifact_get(
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
     meta = item.get("metadata") or {}
-    stored_type = str(meta.get("artifact_type") or "").lower()
+    stored_type = str(meta.get("type") or "").lower()
     if stored_type not in ("model", "dataset", "code"):
-        stored_type = artifact_type
+        stored_type = str(artifact_type).lower()
 
-    # Prefer top-level source_uri (from ModelCreate), fallback to any metadata copy
     source_uri = item.get("source_uri") or meta.get("source_uri")
 
     if stored_type == "model":
@@ -944,11 +867,10 @@ def artifact_get(
 
     return Artifact(
         metadata=ArtifactMetadata(
-            name=item["name"], id=item["id"], type=stored_type
+            name=item["name"], id=item["id"], type=stored_type  # type: ignore[arg-type]
         ),
         data=ArtifactData(url=url, download_url=download_url),
     )
-
 
 
 @router.put("/artifacts/{artifact_type}/{id}", response_model=Artifact)
@@ -977,17 +899,15 @@ def artifact_update(artifact_type: str, id: str, body: Artifact):
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
     meta = item.setdefault("metadata", {})
-    # Keep both top-level and metadata copies of source_uri in sync.
     item["source_uri"] = body.data.url
     meta["source_uri"] = body.data.url
 
-    # If caller updates download_url, persist it as well.
     if body.data.download_url is not None:
         meta["download_url"] = body.data.download_url
 
     download_url = meta.get("download_url")
 
-    stored_type = str(meta.get("artifact_type") or "model").lower()
+    stored_type = str(meta.get("type") or "model").lower()
     if stored_type not in ("model", "dataset", "code"):
         stored_type = "model"
 
@@ -1000,7 +920,7 @@ def artifact_update(artifact_type: str, id: str, body: Artifact):
 
     return Artifact(
         metadata=ArtifactMetadata(
-            name=item["name"], id=item["id"], type=stored_type
+            name=item["name"], id=item["id"], type=stored_type  # type: ignore[arg-type]
         ),
         data=ArtifactData(url=item["source_uri"], download_url=download_url),
     )
@@ -1040,10 +960,9 @@ def artifacts_list(
 
     def infer_type(entry: Dict[str, Any]) -> ArtifactTypeLiteral:
         meta = entry.get("metadata") or {}
-        t = str(meta.get("artifact_type") or "").lower()
+        t = str(meta.get("type") or "").lower()
         return t if t in ("model", "dataset", "code") else "model"
 
-    # OpenAPI spec: you can pass [ { "name": "*" } ] to enumerate all.
     q = queries[0] if queries else ArtifactQuery(name="*", types=None)
     all_items = list(_registry._models)
     logger.info(
@@ -1056,7 +975,6 @@ def artifacts_list(
     if q.name == "*" or not q.name:
         name_filtered = all_items
     else:
-        # STRICT equality on stored name
         name_filtered = [m for m in all_items if (m.get("name") or "") == q.name]
 
     logger.info(
@@ -1084,7 +1002,7 @@ def artifacts_list(
             start = 0
 
     page_size = 1000
-    slice_ = type_filtered[start : start + page_size]
+    slice_ = type_filtered[start: start + page_size]
     next_offset = start + page_size if (start + page_size) < len(type_filtered) else None
 
     if next_offset is not None:
