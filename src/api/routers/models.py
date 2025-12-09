@@ -39,7 +39,7 @@ _START_TIME = time.time()
 
 router = APIRouter()
 
-_registry = RegistryService(bucket_name=os.environ["sot4-model-registry-dev"])
+_registry = RegistryService(bucket_name=os.environ["S3_BUCKET"])
 _scoring = ScoringService()
 _storage = get_storage()
 
