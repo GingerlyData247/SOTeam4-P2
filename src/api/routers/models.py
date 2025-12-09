@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+
+import os
 import io
 import time
 import zipfile
@@ -36,7 +38,7 @@ _START_TIME = time.time()
 
 router = APIRouter()
 
-_registry = RegistryService()
+_registry = RegistryService(bucket_name=os.environ["sot4-model-registry-dev"])
 _scoring = ScoringService()
 _storage = get_storage()
 
