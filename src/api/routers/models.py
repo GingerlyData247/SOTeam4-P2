@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 import os
 import io
 import time
@@ -15,8 +14,10 @@ from urllib.parse import urlparse
 import requests
 from fastapi import APIRouter, Body, HTTPException, Path, Query, Response, Depends
 from pydantic import BaseModel
+from pydantic import ValidationError
 
 from ...schemas.models import ModelCreate
+from ...schemas.models import ModelRating
 from ...services.registry import RegistryService
 from ...services.scoring import ScoringService
 from ...services.storage import get_storage
@@ -38,7 +39,7 @@ _START_TIME = time.time()
 
 router = APIRouter()
 
-_registry = RegistryService(bucket_name=os.environ["S3_BUCKET"])
+_registry = RegistryService(bucket_name=os.environ["sot4-model-registry-dev"])
 _scoring = ScoringService()
 _storage = get_storage()
 
@@ -96,6 +97,70 @@ LICENSE_COMPATIBILITY: Dict[str, set] = {
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _build_rating_from_metadata(artifact: dict) -> ModelRating:
+    """
+    Build a ModelRating from the stored artifact metadata in the registry.json.
+    This assumes the metrics were computed at ingest and stored in `metadata`.
+    """
+    meta = artifact.get("metadata") or {}
+
+    # Basic info
+    name = artifact.get("name", "")
+    category = meta.get("category", "")
+
+    # Map 1:1 metrics from metadata to ModelRating fields
+    rating_data = {
+        "name": name,
+        "category": category,
+
+        "net_score": meta.get("net_score", 0.0),
+        "net_score_latency": meta.get("net_score_latency", 0),
+
+        "ramp_up_time": meta.get("ramp_up_time", 0.0),
+        "ramp_up_time_latency": meta.get("ramp_up_time_latency", 0),
+
+        "bus_factor": meta.get("bus_factor", 0.0),
+        "bus_factor_latency": meta.get("bus_factor_latency", 0),
+
+        "performance_claims": meta.get("performance_claims", 0.0),
+        "performance_claims_latency": meta.get("performance_claims_latency", 0),
+
+        "license": meta.get("license", ""),
+        "license_latency": meta.get("license_latency", 0),
+
+        "reproducibility": meta.get("reproducibility", 0.0),
+        "reproducibility_latency": meta.get("reproducibility_latency", 0),
+
+        "reviewedness": meta.get("reviewedness", 0.0),
+        "reviewedness_latency": meta.get("reviewedness_latency", 0),
+
+        "dataset_and_code_score": meta.get("dataset_and_code_score", 0.0),
+        "dataset_and_code_score_latency": meta.get("dataset_and_code_score_latency", 0),
+
+        "dataset_quality": meta.get("dataset_quality", 0.0),
+        "dataset_quality_latency": meta.get("dataset_quality_latency", 0),
+
+        "code_quality": meta.get("code_quality", 0.0),
+        "code_quality_latency": meta.get("code_quality_latency", 0),
+
+        # These are the ones that differ in naming between metadata and schema:
+        #   metadata: "size" / "size_latency"
+        #   schema:  "size_score" / "size_score_latency"
+        "size_score": meta.get("size") or {
+            "raspberry_pi": 0.0,
+            "jetson_nano": 0.0,
+            "desktop_pc": 0.0,
+            "aws_server": 0.0,
+        },
+        "size_score_latency": meta.get("size_latency", 0),
+
+        # metadata: "treescore" / "treescore_latency"
+        # schema:   "tree_score" / "tree_score_latency"
+        "tree_score": meta.get("treescore", 0.0),
+        "tree_score_latency": meta.get("treescore_latency", 0),
+    }
+
+    return ModelRating(**rating_data)
 
 def _hf_id_from_url_or_id(s: str) -> str:
     return normalize_hf_id(s.strip())
@@ -450,137 +515,33 @@ def artifact_by_name(name: str):
 # -----------------------
 
 
-@router.get("/artifact/model/{id}/rate")
-def model_artifact_rate(id: str):
-    """
-    Compute and return a full ModelRating for an artifact.
-    Matches the Phase 2 OpenAPI specification.
-    """
+@router.get("/artifact/model/{id}/rate", response_model=ModelRating)
+async def rate_model_artifact(id: str):
+    # 1. Look up artifact in the registry (which is backed by S3 now)
+    artifact = _registry.get_artifact_by_id(id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Artifact not found")
 
-    item = _registry.get(id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Artifact does not exist.")
+    meta = artifact.get("metadata") or {}
 
-    if isinstance(item, dict):
-        name = item.get("name")
-        metadata = item.get("metadata", {}) or {}
-        url = metadata.get("source_uri") or f"https://huggingface.co/{name}"
-    else:
-        name = item.name
-        metadata = item.metadata or {}
-        url = getattr(item, "source_uri", None) or metadata.get("source_uri") or f"https://huggingface.co/{name}"
-
-    if not url:
+    # 2. Enforce that this is a MODEL artifact
+    artifact_type = meta.get("type")
+    if artifact_type and artifact_type.lower() != "model":
         raise HTTPException(
             status_code=400,
-            detail="Artifact is missing a source URL for rating."
+            detail="Rating is only supported for model artifacts",
         )
 
-    resource = {
-        "name": name,
-        "url": url,
-        "github_url": metadata.get("github_url"),
-        "local_path": None,
-        "skip_repo_metrics": False,
-        "category": "MODEL",
-    }
+    # 3. Build rating from stored metadata (no recomputation)
+    try:
+        rating = _build_rating_from_metadata(artifact)
+    except ValidationError:
+        # Fallback: recompute using scoring service
+        rated = _scoring.rate(artifact["name"])
+        return ModelRating(**rated)
 
-    rating = _scoring.rate(resource)
+    return rating
 
-    def g(key: str, default=0.0):
-        v = rating.get(key, default)
-        return float(v) if isinstance(v, (int, float)) else default
-
-    def gl(key: str):
-        v = rating.get(key, 0.0)
-        return float(v) if isinstance(v, (int, float)) else 0.0
-
-    raw_size = rating.get("size_score", {})
-
-    if isinstance(raw_size, dict) and \
-        ("raspberry_pi" in raw_size or "jetson_nano" in raw_size):
-
-        size_score_struct = {
-            "raspberry_pi": float(raw_size.get("raspberry_pi", 0.0)),
-            "jetson_nano": float(raw_size.get("jetson_nano", 0.0)),
-            "desktop_pc": float(raw_size.get("desktop_pc", 0.0)),
-            "aws_server": float(raw_size.get("aws_server", 0.0)),
-        }
-        size_latency = gl("size_score_latency")
-
-    elif isinstance(raw_size, dict) and "score" in raw_size:
-        score_val = float(raw_size["score"])
-        size_score_struct = {
-            "raspberry_pi": score_val,
-            "jetson_nano": score_val,
-            "desktop_pc": score_val,
-            "aws_server": score_val,
-        }
-        size_latency = float(raw_size.get("latency", 0.0))
-
-    elif isinstance(raw_size, (list, tuple)) and len(raw_size) >= 2 \
-         and isinstance(raw_size[0], (int, float)):
-
-        score_val = float(raw_size[0])
-        latency_ms = raw_size[1]
-
-        size_score_struct = {
-            "raspberry_pi": score_val,
-            "jetson_nano": score_val,
-            "desktop_pc": score_val,
-            "aws_server": score_val,
-        }
-        size_latency = float(latency_ms) / 1000.0
-
-    else:
-        size_score_struct = {
-            "raspberry_pi": 0.0,
-            "jetson_nano": 0.0,
-            "desktop_pc": 0.0,
-            "aws_server": 0.0,
-        }
-        size_latency = 0.0
-
-    return {
-        "name": name,
-        "category": "model",
-
-        "net_score": g("net_score"),
-        "net_score_latency": gl("net_score_latency"),
-
-        "ramp_up_time": g("ramp_up_time"),
-        "ramp_up_time_latency": gl("ramp_up_time_latency"),
-
-        "bus_factor": g("bus_factor"),
-        "bus_factor_latency": gl("bus_factor_latency"),
-
-        "performance_claims": g("performance_claims"),
-        "performance_claims_latency": gl("performance_claims_latency"),
-
-        "license": g("license"),
-        "license_latency": gl("license_latency"),
-
-        "dataset_and_code_score": g("dataset_and_code_score"),
-        "dataset_and_code_score_latency": gl("dataset_and_code_score_latency"),
-
-        "dataset_quality": g("dataset_quality"),
-        "dataset_quality_latency": gl("dataset_quality_latency"),
-
-        "code_quality": g("code_quality"),
-        "code_quality_latency": gl("code_quality_latency"),
-
-        "reproducibility": g("reproducibility"),
-        "reproducibility_latency": gl("reproducibility_latency"),
-
-        "reviewedness": g("reviewedness"),
-        "reviewedness_latency": gl("reviewedness_latency"),
-
-        "tree_score": g("tree_score"),
-        "tree_score_latency": gl("tree_score_latency"),
-
-        "size_score": size_score_struct,
-        "size_score_latency": size_latency,
-    }
 
 
 @router.get("/artifact/model/{id}/lineage")
