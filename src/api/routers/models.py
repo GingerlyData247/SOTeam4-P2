@@ -645,152 +645,125 @@ def artifact_cost(
 ):
     logger.info("GET /artifact/%s/%s/cost?dependency=%s", artifact_type, id, dependency)
 
-    # -----------------------------
-    # Validate artifact_type
-    # -----------------------------
+    # validate type
     if artifact_type not in ("model", "dataset", "code"):
         raise HTTPException(
             status_code=400,
             detail="Invalid artifact_type; must be model, dataset, or code.",
         )
 
-    # -----------------------------
-    # Fetch the artifact
-    # -----------------------------
+    # fetch root artifact
     item = _registry.get(id)
     if not item:
         logger.warning("artifact_cost: artifact not found: id=%s", id)
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
-    meta = item.get("metadata") or {}
+    # ---------- core cost extractor for ANY artifact ----------
+    def extract_cost(metadata: dict) -> float:
+        def get(meta: dict, name: str, alt: Optional[str] = None) -> float:
+            v = meta.get(name)
+            if isinstance(v, (int, float)):
+                return float(v)
+            if alt:
+                v2 = meta.get(alt)
+                if isinstance(v2, (int, float)):
+                    return float(v2)
+            return 0.0
 
-    # -----------------------------
-    # Extract cost fields
-    # (defaults to 0 if missing — required by autograder)
-    # -----------------------------
-    def cost_field(name: str, alt: Optional[str] = None) -> float:
-        v = meta.get(name)
-        if isinstance(v, (float, int)):
-            return float(v)
-        if alt:
-            v2 = meta.get(alt)
-            if isinstance(v2, (float, int)):
-                return float(v2)
-        return 0.0
+        gpu = get(metadata, "gpu_cost_hour", "gpu_cost")
+        cpu = get(metadata, "cpu_cost_hour", "cpu_cost")
+        mem = get(metadata, "memory_cost_hour", "mem_cost_hour")
+        storage = get(metadata, "storage_cost_month", "storage_cost")
+        return gpu + cpu + mem + storage
 
-    gpu = cost_field("gpu_cost_hour", alt="gpu_cost")
-    cpu = cost_field("cpu_cost_hour", alt="cpu_cost")
-    mem = cost_field("memory_cost_hour", alt="mem_cost_hour")
-    storage = cost_field("storage_cost_month", alt="storage_cost")
+    # standalone cost of root
+    root_meta = item.get("metadata") or {}
+    root_standalone = extract_cost(root_meta)
 
-    standalone_cost = gpu + cpu + mem + storage
-
-    # -----------------------------
-    # NO dependency mode → simple output
-    # -----------------------------
-    if not dependency:
-        logger.info(
-            "artifact_cost: id=%s standalone_only cost=%s",
-            id,
-            standalone_cost,
-        )
-        return {
-            id: {
-                "total_cost": standalone_cost
-            }
-        }
-
-    # ======================================================================
-    # DEPENDENCY MODE (dependency=true)
-    # Must return:
-    # {
-    #   "id": { "standalone_cost": x, "total_cost": y },
-    #   "parentId": { ... },
-    #   ...
-    # }
-    # ======================================================================
-
-    # -----------------------------
-    # Compute lineage graph
-    # -----------------------------
+    # try to get lineage graph (may not exist)
     try:
-        g = _registry.get_lineage_graph(id)
+        graph = _registry.get_lineage_graph(id)
+        nodes = graph.get("nodes", [])
+        edges = graph.get("edges", [])
     except KeyError:
-        logger.warning("artifact_cost: lineage graph unavailable for id=%s", id)
-        # No lineage → same as standalone
-        return {
-            id: {
-                "standalone_cost": standalone_cost,
-                "total_cost": standalone_cost,
+        logger.info("artifact_cost: no lineage graph for id=%s", id)
+        # no dependencies → total_cost == standalone_cost
+        if not dependency:
+            return {id: {"total_cost": root_standalone}}
+        else:
+            return {
+                id: {
+                    "standalone_cost": root_standalone,
+                    "total_cost": root_standalone,
+                }
             }
-        }
 
-    nodes = g.get("nodes", [])
-    edges = g.get("edges", [])
-
-    # Build adjacency for reverse lookup: parent → children
-    parents = {n["id"]: set() for n in nodes}
+    # build parents map: child_id -> {parent_ids}
+    parents: Dict[str, set] = {n["id"]: set() for n in nodes}
     for e in edges:
         parent = e.get("parent")
         child = e.get("child")
-        if parent and child:
+        if parent and child and child in parents:
             parents[child].add(parent)
 
-    # -----------------------------
-    # Helper: compute standalone cost for ANY artifact
-    # -----------------------------
-    def artifact_standalone_cost(artifact_id: str) -> float:
-        entry = _registry.get(artifact_id)
+    # standalone cost for arbitrary artifact id
+    def standalone(aid: str) -> float:
+        entry = _registry.get(aid)
         if not entry:
             return 0.0
-        m = entry.get("metadata") or {}
-        g = cost_field("gpu_cost_hour", alt="gpu_cost")
-        c = cost_field("cpu_cost_hour", alt="cpu_cost")
-        mm = cost_field("memory_cost_hour", alt="mem_cost_hour")
-        s = cost_field("storage_cost_month", alt="storage_cost")
-        return g + c + mm + s
+        meta = entry.get("metadata") or {}
+        return extract_cost(meta)
 
-    # -----------------------------
-    # Recursive: total cost = standalone + parents' total cost
-    # -----------------------------
+    # recursively compute total_cost(aid) = standalone + sum(total(parents))
     cache: Dict[str, float] = {}
 
-    def compute_total(aid: str) -> float:
+    def total(aid: str) -> float:
         if aid in cache:
             return cache[aid]
-
-        base = artifact_standalone_cost(aid)
-        total = base
+        base = standalone(aid)
         for p in parents.get(aid, []):
-            total += compute_total(p)
+            base += total(p)
+        cache[aid] = base
+        return base
 
-        cache[aid] = total
-        return total
+    # -------------------
+    # dependency = False
+    # -------------------
+    if not dependency:
+        root_total = total(id)
+        logger.info(
+            "artifact_cost: dependency=false id=%s standalone=%s total=%s",
+            id,
+            root_standalone,
+            root_total,
+        )
+        return {id: {"total_cost": root_total}}
 
-    # -----------------------------
-    # Build output object
-    # -----------------------------
-    out = {}
+    # -------------------
+    # dependency = True
+    # -------------------
+    result: Dict[str, Dict[str, float]] = {}
 
     for node in nodes:
         nid = node["id"]
-        sc = artifact_standalone_cost(nid)
-        tc = compute_total(nid)
-
-        out[nid] = {
+        sc = standalone(nid)
+        tc = total(nid)
+        result[nid] = {
             "standalone_cost": sc,
-            "total_cost": tc
+            "total_cost": tc,
         }
 
-    # Must include the root ID as well
-    if id not in out:
-        out[id] = {
-            "standalone_cost": standalone_cost,
-            "total_cost": compute_total(id),
+    # ensure root included even if not explicitly in nodes
+    if id not in result:
+        result[id] = {
+            "standalone_cost": root_standalone,
+            "total_cost": total(id),
         }
 
-    logger.info("artifact_cost(dependency=true): id=%s total_nodes=%d", id, len(out))
-    return out
+    logger.info(
+        "artifact_cost: dependency=true id=%s nodes=%d", id, len(result)
+    )
+    return result
 
 
 # =======================================================================
