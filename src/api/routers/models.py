@@ -535,30 +535,97 @@ def artifact_by_name(name: str):
 
 @router.get("/artifact/model/{id}/rate", response_model=ModelRating)
 async def rate_model_artifact(id: str):
-    # 1. Look up artifact in the registry (which is backed by S3 now)
+    logger.info("GET /artifact/model/%s/rate", id)
+
+    # 1) Validate ID format (matches ArtifactID spec: numeric string)
+    if not re.fullmatch(r"\d{1,12}", id):
+        logger.warning("rate_model_artifact: invalid id format id=%s", id)
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid artifact ID; must be a numeric string (1–12 digits).",
+        )
+
+    # 2) Look up artifact in the registry
     artifact = _registry.get(id)
     if not artifact:
+        logger.warning("rate_model_artifact: artifact not found id=%s", id)
         raise HTTPException(status_code=404, detail="Artifact not found")
 
     meta = artifact.get("metadata") or {}
+    artifact_type = str(meta.get("type") or "model").lower()
 
-    # 2. Enforce that this is a MODEL artifact
-    artifact_type = meta.get("type")
-    if artifact_type and artifact_type.lower() != "model":
+    # 3) Enforce that this is a MODEL artifact
+    if artifact_type != "model":
+        logger.warning(
+            "rate_model_artifact: non-model artifact requested: id=%s type=%s",
+            id,
+            artifact_type,
+        )
         raise HTTPException(
             status_code=400,
             detail="Rating is only supported for model artifacts",
         )
 
-    # 3. Build rating from stored metadata (no recomputation)
+    # 4) Primary path: build rating from stored metadata
     try:
         rating = _build_rating_from_metadata(artifact)
-    except ValidationError:
-        # Fallback: recompute using scoring service
-        rated = _scoring.rate(artifact["name"])
-        return ModelRating(**rated)
+        logger.info("rate_model_artifact: built rating from metadata id=%s", id)
+        return rating
+    except ValidationError as e:
+        logger.warning(
+            "rate_model_artifact: metadata → ModelRating validation failed id=%s error=%s",
+            id,
+            e,
+        )
 
-    return rating
+    # 5) Fallback: recompute via scoring service
+    try:
+        # ScoringService.rate expects a dict-like 'resource', not a plain string.
+        resource = {
+            "name": artifact["name"],
+            "url": artifact.get("source_uri") or meta.get("source_uri"),
+            "github_url": None,
+            "local_path": None,
+            "skip_repo_metrics": False,
+            "category": meta.get("category") or "MODEL",
+        }
+
+        logger.info("rate_model_artifact: invoking scoring.rate for id=%s", id)
+        rated = _scoring.rate(resource)
+
+        # First try: maybe rated already matches ModelRating fields directly
+        try:
+            rating = ModelRating(**rated)
+            logger.info(
+                "rate_model_artifact: scoring.rate returned ModelRating-compatible data id=%s",
+                id,
+            )
+            return rating
+        except ValidationError:
+            # Second try: treat rated as "metadata" and reuse the same builder
+            logger.info(
+                "rate_model_artifact: normalizing scoring.rate output via _build_rating_from_metadata id=%s",
+                id,
+            )
+            artifact_from_rated = {
+                "name": artifact["name"],
+                "metadata": rated,
+            }
+            return _build_rating_from_metadata(artifact_from_rated)
+
+    except HTTPException:
+        # Re-raise explicit HTTPExceptions untouched
+        raise
+    except Exception as e:
+        logger.error(
+            "rate_model_artifact: fallback scoring failed id=%s error=%s",
+            id,
+            e,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to compute rating for artifact.",
+        )
 
 
 
