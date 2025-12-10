@@ -66,9 +66,18 @@ class RegistryService:
 
     def get(self, id_: str) -> Optional[Dict[str, Any]]:
         self._load()
+
+        if id_ is None:
+            return None
+
+        # Normalize input
+        id_str = str(id_).strip()
+
         for m in self._models:
-            if m["id"] == id_:
+            mid = str(m.get("id", "")).strip()
+            if mid == id_str:
                 return m
+
         return None
 
     def delete(self, id_: str) -> bool:
