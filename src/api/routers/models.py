@@ -99,68 +99,87 @@ LICENSE_COMPATIBILITY: Dict[str, set] = {
 
 def _build_rating_from_metadata(artifact: dict) -> ModelRating:
     """
-    Build a ModelRating from the stored artifact metadata in the registry.json.
-    This assumes the metrics were computed at ingest and stored in `metadata`.
+    Build a ModelRating object from stored registry metadata.
+    Ensures full OpenAPI ModelRating compliance, numeric type coercion,
+    and correct defaults for missing metrics.
     """
+
     meta = artifact.get("metadata") or {}
 
-    # Basic info
-    name = artifact.get("name", "")
-    category = meta.get("category", "")
+    # -------------------------------
+    # Helper: safe numeric conversion
+    # -------------------------------
+    def num(x, default=0.0):
+        try:
+            if isinstance(x, (int, float)):
+                return float(x)
+            return float(default)
+        except Exception:
+            return float(default)
 
-    # Map 1:1 metrics from metadata to ModelRating fields
+    # -------------------------------
+    # Collapse size dict → single float
+    # (OpenAPI requires *number*, not an object)
+    # -------------------------------
+    raw_size = meta.get("size")
+    if isinstance(raw_size, dict):
+        # average of device values if present
+        vals = [v for v in raw_size.values() if isinstance(v, (int, float))]
+        size_score = float(sum(vals) / len(vals)) if vals else 0.0
+    else:
+        size_score = num(raw_size, 0.0)
+
+    # -------------------------------
+    # OpenAPI requires ALL fields:
+    # ensure missing fields default to numeric 0
+    # -------------------------------
+
     rating_data = {
-        "name": name,
-        "category": category,
+        "name": artifact.get("name", ""),
+        "category": meta.get("category", ""),
 
-        "net_score": meta.get("net_score", 0.0),
-        "net_score_latency": meta.get("net_score_latency", 0),
+        "net_score": num(meta.get("net_score")),
+        "net_score_latency": num(meta.get("net_score_latency"), 0),
 
-        "ramp_up_time": meta.get("ramp_up_time", 0.0),
-        "ramp_up_time_latency": meta.get("ramp_up_time_latency", 0),
+        "ramp_up_time": num(meta.get("ramp_up_time")),
+        "ramp_up_time_latency": num(meta.get("ramp_up_time_latency"), 0),
 
-        "bus_factor": meta.get("bus_factor", 0.0),
-        "bus_factor_latency": meta.get("bus_factor_latency", 0),
+        "bus_factor": num(meta.get("bus_factor")),
+        "bus_factor_latency": num(meta.get("bus_factor_latency"), 0),
 
-        "performance_claims": meta.get("performance_claims", 0.0),
-        "performance_claims_latency": meta.get("performance_claims_latency", 0),
+        "performance_claims": num(meta.get("performance_claims")),
+        "performance_claims_latency": num(meta.get("performance_claims_latency"), 0),
 
-        "license": meta.get("license", ""),
-        "license_latency": meta.get("license_latency", 0),
+        # License MUST be numeric. Use 0 when license="" or missing.
+        "license": num(meta.get("license"), 0),
+        "license_latency": num(meta.get("license_latency"), 0),
 
-        "reproducibility": meta.get("reproducibility", 0.0),
-        "reproducibility_latency": meta.get("reproducibility_latency", 0),
+        "dataset_and_code_score": num(meta.get("dataset_and_code_score")),
+        "dataset_and_code_score_latency": num(meta.get("dataset_and_code_score_latency"), 0),
 
-        "reviewedness": meta.get("reviewedness", 0.0),
-        "reviewedness_latency": meta.get("reviewedness_latency", 0),
+        "dataset_quality": num(meta.get("dataset_quality")),
+        "dataset_quality_latency": num(meta.get("dataset_quality_latency"), 0),
 
-        "dataset_and_code_score": meta.get("dataset_and_code_score", 0.0),
-        "dataset_and_code_score_latency": meta.get("dataset_and_code_score_latency", 0),
+        "code_quality": num(meta.get("code_quality")),
+        "code_quality_latency": num(meta.get("code_quality_latency"), 0),
 
-        "dataset_quality": meta.get("dataset_quality", 0.0),
-        "dataset_quality_latency": meta.get("dataset_quality_latency", 0),
+        "reproducibility": num(meta.get("reproducibility")),
+        "reproducibility_latency": num(meta.get("reproducibility_latency"), 0),
 
-        "code_quality": meta.get("code_quality", 0.0),
-        "code_quality_latency": meta.get("code_quality_latency", 0),
+        "reviewedness": num(meta.get("reviewedness")),
+        "reviewedness_latency": num(meta.get("reviewedness_latency"), 0),
 
-        # These are the ones that differ in naming between metadata and schema:
-        #   metadata: "size" / "size_latency"
-        #   schema:  "size_score" / "size_score_latency"
-        "size_score": meta.get("size") or {
-            "raspberry_pi": 0.0,
-            "jetson_nano": 0.0,
-            "desktop_pc": 0.0,
-            "aws_server": 0.0,
-        },
-        "size_score_latency": meta.get("size_latency", 0),
+        # Name difference: metadata uses "treescore"
+        "tree_score": num(meta.get("treescore"), 0),
+        "tree_score_latency": num(meta.get("treescore_latency"), 0),
 
-        # metadata: "treescore" / "treescore_latency"
-        # schema:   "tree_score" / "tree_score_latency"
-        "tree_score": meta.get("treescore", 0.0),
-        "tree_score_latency": meta.get("treescore_latency", 0),
+        # size_score must be numeric (OpenAPI)
+        "size_score": float(size_score),
+        "size_score_latency": num(meta.get("size_latency"), 0),
     }
 
     return ModelRating(**rating_data)
+
 
 def _hf_id_from_url_or_id(s: str) -> str:
     return normalize_hf_id(s.strip())
