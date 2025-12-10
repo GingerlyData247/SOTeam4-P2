@@ -537,7 +537,7 @@ def artifact_by_name(name: str):
 @router.get("/artifact/model/{id}/rate", response_model=ModelRating)
 async def rate_model_artifact(id: str):
     # 1. Look up artifact in the registry (which is backed by S3 now)
-    artifact = _registry.get_artifact_by_id(id)
+    artifact = _registry.get(id)
     if not artifact:
         raise HTTPException(status_code=404, detail="Artifact not found")
 
