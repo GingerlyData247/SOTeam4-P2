@@ -99,85 +99,84 @@ LICENSE_COMPATIBILITY: Dict[str, set] = {
 
 def _build_rating_from_metadata(artifact: dict) -> ModelRating:
     """
-    Build a ModelRating object from stored registry metadata.
-    Ensures full OpenAPI ModelRating compliance, numeric type coercion,
-    and correct defaults for missing metrics.
+    Build a ModelRating from the stored artifact metadata in the registry.json.
+    This assumes the metrics were computed at ingest and stored in `metadata`.
+    Ensures full OpenAPI ModelRating compliance and correct types.
     """
-
     meta = artifact.get("metadata") or {}
 
     # -------------------------------
     # Helper: safe numeric conversion
     # -------------------------------
-    def num(x, default=0.0):
+    def num(x, default: float = 0.0) -> float:
         try:
             if isinstance(x, (int, float)):
                 return float(x)
-            return float(default)
+            # strings like "0.5" -> 0.5
+            return float(x)
         except Exception:
             return float(default)
 
     # -------------------------------
-    # Collapse size dict → single float
-    # (OpenAPI requires *number*, not an object)
+    # Size score: object with 4 numeric fields
+    # metadata uses "size" with those keys already
     # -------------------------------
-    raw_size = meta.get("size")
-    if isinstance(raw_size, dict):
-        # average of device values if present
-        vals = [v for v in raw_size.values() if isinstance(v, (int, float))]
-        size_score = float(sum(vals) / len(vals)) if vals else 0.0
-    else:
-        size_score = num(raw_size, 0.0)
+    raw_size = meta.get("size") or {}
+    if not isinstance(raw_size, dict):
+        raw_size = {}
 
-    # -------------------------------
-    # OpenAPI requires ALL fields:
-    # ensure missing fields default to numeric 0
-    # -------------------------------
+    size_score = {
+        "raspberry_pi": num(raw_size.get("raspberry_pi"), 0.0),
+        "jetson_nano": num(raw_size.get("jetson_nano"), 0.0),
+        "desktop_pc": num(raw_size.get("desktop_pc"), 0.0),
+        "aws_server": num(raw_size.get("aws_server"), 0.0),
+    }
 
     rating_data = {
         "name": artifact.get("name", ""),
         "category": meta.get("category", ""),
 
-        "net_score": num(meta.get("net_score")),
-        "net_score_latency": num(meta.get("net_score_latency"), 0),
+        "net_score": num(meta.get("net_score"), 0.0),
+        "net_score_latency": num(meta.get("net_score_latency"), 0.0),
 
-        "ramp_up_time": num(meta.get("ramp_up_time")),
-        "ramp_up_time_latency": num(meta.get("ramp_up_time_latency"), 0),
+        "ramp_up_time": num(meta.get("ramp_up_time"), 0.0),
+        "ramp_up_time_latency": num(meta.get("ramp_up_time_latency"), 0.0),
 
-        "bus_factor": num(meta.get("bus_factor")),
-        "bus_factor_latency": num(meta.get("bus_factor_latency"), 0),
+        "bus_factor": num(meta.get("bus_factor"), 0.0),
+        "bus_factor_latency": num(meta.get("bus_factor_latency"), 0.0),
 
-        "performance_claims": num(meta.get("performance_claims")),
-        "performance_claims_latency": num(meta.get("performance_claims_latency"), 0),
+        "performance_claims": num(meta.get("performance_claims"), 0.0),
+        "performance_claims_latency": num(meta.get("performance_claims_latency"), 0.0),
 
-        # License MUST be numeric. Use 0 when license="" or missing.
-        "license": num(meta.get("license"), 0),
-        "license_latency": num(meta.get("license_latency"), 0),
+        # license in metadata is often "" or a string SPDX id.
+        # Spec wants a numeric suitability score → coerce or default to 0.0.
+        "license": num(meta.get("license"), 0.0),
+        "license_latency": num(meta.get("license_latency"), 0.0),
 
-        "dataset_and_code_score": num(meta.get("dataset_and_code_score")),
-        "dataset_and_code_score_latency": num(meta.get("dataset_and_code_score_latency"), 0),
+        "dataset_and_code_score": num(meta.get("dataset_and_code_score"), 0.0),
+        "dataset_and_code_score_latency": num(meta.get("dataset_and_code_score_latency"), 0.0),
 
-        "dataset_quality": num(meta.get("dataset_quality")),
-        "dataset_quality_latency": num(meta.get("dataset_quality_latency"), 0),
+        "dataset_quality": num(meta.get("dataset_quality"), 0.0),
+        "dataset_quality_latency": num(meta.get("dataset_quality_latency"), 0.0),
 
-        "code_quality": num(meta.get("code_quality")),
-        "code_quality_latency": num(meta.get("code_quality_latency"), 0),
+        "code_quality": num(meta.get("code_quality"), 0.0),
+        "code_quality_latency": num(meta.get("code_quality_latency"), 0.0),
 
-        "reproducibility": num(meta.get("reproducibility")),
-        "reproducibility_latency": num(meta.get("reproducibility_latency"), 0),
+        "reproducibility": num(meta.get("reproducibility"), 0.0),
+        "reproducibility_latency": num(meta.get("reproducibility_latency"), 0.0),
 
-        "reviewedness": num(meta.get("reviewedness")),
-        "reviewedness_latency": num(meta.get("reviewedness_latency"), 0),
+        "reviewedness": num(meta.get("reviewedness"), 0.0),
+        "reviewedness_latency": num(meta.get("reviewedness_latency"), 0.0),
 
-        # Name difference: metadata uses "treescore"
-        "tree_score": num(meta.get("treescore"), 0),
-        "tree_score_latency": num(meta.get("treescore_latency"), 0),
+        # metadata key is "treescore" / "treescore_latency"
+        "tree_score": num(meta.get("treescore"), 0.0),
+        "tree_score_latency": num(meta.get("treescore_latency"), 0.0),
 
-        # size_score must be numeric (OpenAPI)
-        "size_score": float(size_score),
-        "size_score_latency": num(meta.get("size_latency"), 0),
+        "size_score": size_score,
+        "size_score_latency": num(meta.get("size_latency"), 0.0),
     }
 
+    # Let pydantic enforce the schema & types
     return ModelRating(**rating_data)
 
 
