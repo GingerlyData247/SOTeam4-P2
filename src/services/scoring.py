@@ -142,15 +142,20 @@ class ScoringService:
     # ---------------------------------------------------------------------- #
     # RATE (compute all metrics)
     # ---------------------------------------------------------------------- #
-     def rate(self, resource: Any) -> Dict[str, Any]:
+         # ----------------------------------------------------------------------
+    # RATE (compute all metrics)
+    # ----------------------------------------------------------------------
+    def rate(self, resource: Any) -> Dict[str, Any]:
         """
-        Compute model metrics & return an object matching the ModelRating schema exactly.
+        Compute model metrics & return a dict matching the ModelRating schema.
 
-        Accepts either:
-          - a Hugging Face model id / name (string), OR
-          - an artifact dict containing at least a `name` field.
+        Accepts:
+            - a HuggingFace model name/id string, OR
+            - an artifact dict with at least "name"
         """
-        # 1. Normalize input to an HF model id
+        # -------------------------
+        # Normalize to HF id
+        # -------------------------
         if isinstance(resource, dict):
             raw_name = resource.get("name") or resource.get("id") or ""
         else:
@@ -158,7 +163,9 @@ class ScoringService:
 
         hf_id = normalize_hf_id(raw_name)
 
-        # 2. Build minimal Phase 1-style resource and reuse compute_metrics_for_model
+        # -------------------------
+        # Build Phase 1 style resource
+        # -------------------------
         base_resource = {
             "name": hf_id,
             "url": f"https://huggingface.co/{hf_id}",
@@ -168,6 +175,9 @@ class ScoringService:
             "category": "MODEL",
         }
 
+        # -------------------------
+        # Compute all metrics
+        # -------------------------
         metrics = compute_metrics_for_model(base_resource)
 
         def m(field: str, default: float = 0.0) -> float:
@@ -178,14 +188,17 @@ class ScoringService:
                 return default
 
         def latency(field: str) -> float:
-            v = metrics.get(f"{field}_latency", 0.0)
+            val = metrics.get(f"{field}_latency", 0.0)
             try:
-                return float(v)
+                return float(val)
             except Exception:
                 return 0.0
 
-        # Handle size metric, which may be under "size" or "size_score"
+        # -------------------------
+        # Normalize size_score
+        # -------------------------
         raw_size = metrics.get("size_score") or metrics.get("size") or {}
+
         if isinstance(raw_size, dict):
             size_score = {
                 "raspberry_pi": float(raw_size.get("raspberry_pi", 0.0)),
@@ -202,57 +215,47 @@ class ScoringService:
                 "aws_server": v,
             }
 
-        # 3. Construct ModelRating-shaped dict
+        # -------------------------
+        # Build final response matching ModelRating exactly
+        # -------------------------
         return {
-            # name & category
             "name": metrics.get("name", hf_id),
             "category": "model",
 
-            # net_score
             "net_score": m("net_score"),
             "net_score_latency": latency("net_score"),
 
-            # ramp_up_time
             "ramp_up_time": m("ramp_up_time"),
             "ramp_up_time_latency": latency("ramp_up_time"),
 
-            # bus_factor
             "bus_factor": m("bus_factor"),
             "bus_factor_latency": latency("bus_factor"),
 
-            # performance_claims
             "performance_claims": m("performance_claims"),
             "performance_claims_latency": latency("performance_claims"),
 
-            # license
             "license": m("license"),
             "license_latency": latency("license"),
 
-            # dataset_and_code_score
             "dataset_and_code_score": m("dataset_and_code_score"),
             "dataset_and_code_score_latency": latency("dataset_and_code_score"),
 
-            # dataset_quality
             "dataset_quality": m("dataset_quality"),
             "dataset_quality_latency": latency("dataset_quality"),
 
-            # code_quality
             "code_quality": m("code_quality"),
             "code_quality_latency": latency("code_quality"),
 
-            # reproducibility
             "reproducibility": m("reproducibility"),
             "reproducibility_latency": latency("reproducibility"),
 
-            # reviewedness
             "reviewedness": m("reviewedness"),
             "reviewedness_latency": latency("reviewedness"),
 
-            # tree_score (from internal `treescore`)
             "tree_score": m("treescore"),
             "tree_score_latency": latency("treescore"),
 
-            # size_score
             "size_score": size_score,
-            "size_score_latency": latency("size") or latency("size_score"),
+            "size_score_latency": latency("size_score") or latency("size"),
         }
+
