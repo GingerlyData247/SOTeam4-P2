@@ -97,87 +97,94 @@ LICENSE_COMPATIBILITY: Dict[str, set] = {
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _as_float(value: Any, default: float = 0.0) -> float:
+    """Safe float coercion for metadata values."""
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except Exception:
+        return default
+
 def _build_rating_from_metadata(artifact: dict) -> ModelRating:
     """
     Build a ModelRating from the stored artifact metadata in the registry.json.
     This assumes the metrics were computed at ingest and stored in `metadata`.
-    Ensures full OpenAPI ModelRating compliance and correct types.
     """
     meta = artifact.get("metadata") or {}
 
-    # -------------------------------
-    # Helper: safe numeric conversion
-    # -------------------------------
-    def num(x, default: float = 0.0) -> float:
-        try:
-            if isinstance(x, (int, float)):
-                return float(x)
-            # strings like "0.5" -> 0.5
-            return float(x)
-        except Exception:
-            return float(default)
+    # Basic info
+    name = artifact.get("name", "")
+    category = str(meta.get("category") or "model")
 
-    # -------------------------------
-    # Size score: object with 4 numeric fields
-    # metadata uses "size" with those keys already
-    # -------------------------------
-    raw_size = meta.get("size") or {}
-    if not isinstance(raw_size, dict):
-        raw_size = {}
-
-    size_score = {
-        "raspberry_pi": num(raw_size.get("raspberry_pi"), 0.0),
-        "jetson_nano": num(raw_size.get("jetson_nano"), 0.0),
-        "desktop_pc": num(raw_size.get("desktop_pc"), 0.0),
-        "aws_server": num(raw_size.get("aws_server"), 0.0),
-    }
+    # Handle size fields (stored under `size` in registry.json)
+    raw_size = meta.get("size")
+    if isinstance(raw_size, dict):
+        size_score = {
+            "raspberry_pi": _as_float(raw_size.get("raspberry_pi", 0.0)),
+            "jetson_nano": _as_float(raw_size.get("jetson_nano", 0.0)),
+            "desktop_pc": _as_float(raw_size.get("desktop_pc", 0.0)),
+            "aws_server": _as_float(raw_size.get("aws_server", 0.0)),
+        }
+    else:
+        v = _as_float(raw_size, 0.0)
+        size_score = {
+            "raspberry_pi": v,
+            "jetson_nano": v,
+            "desktop_pc": v,
+            "aws_server": v,
+        }
 
     rating_data = {
-        "name": artifact.get("name", ""),
-        "category": meta.get("category", ""),
+        "name": name,
+        "category": category,
 
-        "net_score": num(meta.get("net_score"), 0.0),
-        "net_score_latency": num(meta.get("net_score_latency"), 0.0),
+        "net_score": _as_float(meta.get("net_score", 0.0)),
+        "net_score_latency": _as_float(meta.get("net_score_latency", 0.0)),
 
-        "ramp_up_time": num(meta.get("ramp_up_time"), 0.0),
-        "ramp_up_time_latency": num(meta.get("ramp_up_time_latency"), 0.0),
+        "ramp_up_time": _as_float(meta.get("ramp_up_time", 0.0)),
+        "ramp_up_time_latency": _as_float(meta.get("ramp_up_time_latency", 0.0)),
 
-        "bus_factor": num(meta.get("bus_factor"), 0.0),
-        "bus_factor_latency": num(meta.get("bus_factor_latency"), 0.0),
+        "bus_factor": _as_float(meta.get("bus_factor", 0.0)),
+        "bus_factor_latency": _as_float(meta.get("bus_factor_latency", 0.0)),
 
-        "performance_claims": num(meta.get("performance_claims"), 0.0),
-        "performance_claims_latency": num(meta.get("performance_claims_latency"), 0.0),
+        "performance_claims": _as_float(meta.get("performance_claims", 0.0)),
+        "performance_claims_latency": _as_float(meta.get("performance_claims_latency", 0.0)),
 
-        # license in metadata is often "" or a string SPDX id.
-        # Spec wants a numeric suitability score → coerce or default to 0.0.
-        "license": num(meta.get("license"), 0.0),
-        "license_latency": num(meta.get("license_latency"), 0.0),
+        # license metric is numeric in Phase 2
+        "license": _as_float(meta.get("license", 0.0)),
+        "license_latency": _as_float(meta.get("license_latency", 0.0)),
 
-        "dataset_and_code_score": num(meta.get("dataset_and_code_score"), 0.0),
-        "dataset_and_code_score_latency": num(meta.get("dataset_and_code_score_latency"), 0.0),
+        "dataset_and_code_score": _as_float(meta.get("dataset_and_code_score", 0.0)),
+        "dataset_and_code_score_latency": _as_float(meta.get("dataset_and_code_score_latency", 0.0)),
 
-        "dataset_quality": num(meta.get("dataset_quality"), 0.0),
-        "dataset_quality_latency": num(meta.get("dataset_quality_latency"), 0.0),
+        "dataset_quality": _as_float(meta.get("dataset_quality", 0.0)),
+        "dataset_quality_latency": _as_float(meta.get("dataset_quality_latency", 0.0)),
 
-        "code_quality": num(meta.get("code_quality"), 0.0),
-        "code_quality_latency": num(meta.get("code_quality_latency"), 0.0),
+        "code_quality": _as_float(meta.get("code_quality", 0.0)),
+        "code_quality_latency": _as_float(meta.get("code_quality_latency", 0.0)),
 
-        "reproducibility": num(meta.get("reproducibility"), 0.0),
-        "reproducibility_latency": num(meta.get("reproducibility_latency"), 0.0),
+        "reproducibility": _as_float(meta.get("reproducibility", 0.0)),
+        "reproducibility_latency": _as_float(meta.get("reproducibility_latency", 0.0)),
 
-        "reviewedness": num(meta.get("reviewedness"), 0.0),
-        "reviewedness_latency": num(meta.get("reviewedness_latency"), 0.0),
+        "reviewedness": _as_float(meta.get("reviewedness", 0.0)),
+        "reviewedness_latency": _as_float(meta.get("reviewedness_latency", 0.0)),
 
-        # metadata key is "treescore" / "treescore_latency"
-        "tree_score": num(meta.get("treescore"), 0.0),
-        "tree_score_latency": num(meta.get("treescore_latency"), 0.0),
+        # metadata uses `treescore` / `treescore_latency`
+        "tree_score": _as_float(meta.get("tree_score", meta.get("treescore", 0.0))),
+        "tree_score_latency": _as_float(
+            meta.get("tree_score_latency", meta.get("treescore_latency", 0.0))
+        ),
 
+        # size_score (nested object)
         "size_score": size_score,
-        "size_score_latency": num(meta.get("size_latency"), 0.0),
+        "size_score_latency": _as_float(
+            meta.get("size_score_latency", meta.get("size_latency", 0.0))
+        ),
     }
 
-    # Let pydantic enforce the schema & types
     return ModelRating(**rating_data)
+
 
 
 def _hf_id_from_url_or_id(s: str) -> str:
@@ -537,96 +544,88 @@ def artifact_by_name(name: str):
 async def rate_model_artifact(id: str):
     logger.info("GET /artifact/model/%s/rate", id)
 
-    # 1) Validate ID format (matches ArtifactID spec: numeric string)
-    if not re.fullmatch(r"\d{1,12}", id):
-        logger.warning("rate_model_artifact: invalid id format id=%s", id)
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid artifact ID; must be a numeric string (1–12 digits).",
-        )
-
-    # 2) Look up artifact in the registry
+    # 1. Look up artifact in the registry
     artifact = _registry.get(id)
     if not artifact:
-        logger.warning("rate_model_artifact: artifact not found id=%s", id)
+        logger.warning("rate_model_artifact: artifact not found: id=%s", id)
         raise HTTPException(status_code=404, detail="Artifact not found")
 
     meta = artifact.get("metadata") or {}
-    artifact_type = str(meta.get("type") or "model").lower()
 
-    # 3) Enforce that this is a MODEL artifact
+    # 2. Enforce that this is a MODEL artifact (if we have a type)
+    artifact_type = str(meta.get("type") or "model").lower()
+    if artifact_type not in ("model", "dataset", "code"):
+        artifact_type = "model"
+
     if artifact_type != "model":
         logger.warning(
-            "rate_model_artifact: non-model artifact requested: id=%s type=%s",
-            id,
-            artifact_type,
+            "rate_model_artifact: non-model artifact type=%s id=%s", artifact_type, id
         )
         raise HTTPException(
             status_code=400,
             detail="Rating is only supported for model artifacts",
         )
 
-    # 4) Primary path: build rating from stored metadata
-    try:
-        rating = _build_rating_from_metadata(artifact)
-        logger.info("rate_model_artifact: built rating from metadata id=%s", id)
-        return rating
-    except ValidationError as e:
-        logger.warning(
-            "rate_model_artifact: metadata → ModelRating validation failed id=%s error=%s",
-            id,
-            e,
-        )
+    # 3. Decide whether we have a full metrics snapshot in metadata
+    core_keys = {
+        "net_score",
+        "ramp_up_time",
+        "bus_factor",
+        "performance_claims",
+        "license",
+        "dataset_and_code_score",
+        "dataset_quality",
+        "code_quality",
+        "reproducibility",
+        "reviewedness",
+        "treescore",
+        "size",
+    }
+    has_metrics = core_keys.issubset(set(meta.keys()))
 
-    # 5) Fallback: recompute via scoring service
-    try:
-        # ScoringService.rate expects a dict-like 'resource', not a plain string.
-        resource = {
-            "name": artifact["name"],
-            "url": artifact.get("source_uri") or meta.get("source_uri"),
-            "github_url": None,
-            "local_path": None,
-            "skip_repo_metrics": False,
-            "category": meta.get("category") or "MODEL",
-        }
-
-        logger.info("rate_model_artifact: invoking scoring.rate for id=%s", id)
-        rated = _scoring.rate(resource)
-
-        # First try: maybe rated already matches ModelRating fields directly
+    # 4a. Preferred path: build rating from stored metadata
+    if has_metrics:
         try:
-            rating = ModelRating(**rated)
+            rating = _build_rating_from_metadata(artifact)
             logger.info(
-                "rate_model_artifact: scoring.rate returned ModelRating-compatible data id=%s",
+                "rate_model_artifact: using stored metadata for id=%s name=%s",
                 id,
+                artifact.get("name"),
             )
             return rating
-        except ValidationError:
-            # Second try: treat rated as "metadata" and reuse the same builder
-            logger.info(
-                "rate_model_artifact: normalizing scoring.rate output via _build_rating_from_metadata id=%s",
+        except ValidationError as e:
+            # Fall back to recompute
+            logger.warning(
+                "rate_model_artifact: stored metadata invalid; recomputing: id=%s error=%s",
                 id,
+                e,
             )
-            artifact_from_rated = {
-                "name": artifact["name"],
-                "metadata": rated,
-            }
-            return _build_rating_from_metadata(artifact_from_rated)
 
-    except HTTPException:
-        # Re-raise explicit HTTPExceptions untouched
-        raise
-    except Exception as e:
+    # 4b. Fallback path: recompute using scoring service
+    try:
+        # Pass the whole artifact dict; ScoringService.rate can accept this
+        rated_dict = _scoring.rate(artifact)
+        rating = ModelRating(**rated_dict)
+        logger.info(
+            "rate_model_artifact: recomputed rating for id=%s name=%s",
+            id,
+            artifact.get("name"),
+        )
+        return rating
+    except ValidationError as e:
         logger.error(
-            "rate_model_artifact: fallback scoring failed id=%s error=%s",
+            "rate_model_artifact: scoring service produced invalid rating: id=%s error=%s",
             id,
             e,
         )
-        raise HTTPException(
-            status_code=500,
-            detail="Unable to compute rating for artifact.",
+        raise HTTPException(status_code=500, detail="Internal rating error.")
+    except Exception as e:
+        logger.error(
+            "rate_model_artifact: unexpected error recomputing rating: id=%s error=%s",
+            id,
+            e,
         )
-
+        raise HTTPException(status_code=500, detail="Internal rating error.")
 
 
 @router.get("/artifact/model/{id}/lineage")
