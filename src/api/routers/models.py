@@ -1107,7 +1107,7 @@ def artifact_delete(artifact_type: str, id: str):
 # ---------------------------------------------------------------------------
 
 
-@router.post("/artifact", status_code=201)
+@router.post("/artifacts", status_code=201)
 def artifact_create(body: ArtifactCreate):
     """
     Create a model, dataset, or code artifact.
