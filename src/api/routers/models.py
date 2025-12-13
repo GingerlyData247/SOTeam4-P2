@@ -1107,67 +1107,76 @@ def artifact_delete(artifact_type: str, id: str):
 # ---------------------------------------------------------------------------
 
 
-@router.post("/artifact", status_code=201)
-def artifact_create(body: ArtifactCreate):
-    """
-    Create a model, dataset, or code artifact.
+@router.post("/artifacts", response_model=List[ArtifactMetadata])
+def artifacts_list(
+    queries: List[ArtifactQuery],
+    response: Response,
+    offset: Optional[str] = Query(None),
+):
+    logger.info(
+        "POST /artifacts: raw_queries=%s offset=%s",
+        queries,
+        offset,
+    )
 
-    IMPORTANT:
-    - Autograder sends a `name` field even though the spec is ambiguous
-    - We MUST honor it if present
-    - metadata.name MUST always be populated
-    """
+    def infer_type(entry: Dict[str, Any]) -> ArtifactTypeLiteral:
+        meta = entry.get("metadata") or {}
+        t = str(meta.get("type") or "").lower()
+        return t if t in ("model", "dataset", "code") else "model"
 
-    # 1. Determine artifact type
-    artifact_type = body.type.lower()
+    q = queries[0] if queries else ArtifactQuery(name="*", types=None)
+    all_items = list(_registry._models)
+    logger.info(
+        "artifacts_list: total_items=%d query_name=%s query_types=%s",
+        len(all_items),
+        q.name,
+        q.types,
+    )
 
-    # 2. Determine name (explicit > URL-derived)
-    if body.name and body.name.strip():
-        name = body.name.strip()
+    if q.name == "*" or not q.name:
+        name_filtered = all_items
     else:
-        # Fallback: infer from URL
-        name = body.url.rstrip("/").split("/")[-1]
+        name_filtered = [m for m in all_items if (m.get("name") or "") == q.name]
 
-    # 3. Build base create object
-    if artifact_type == "model":
-        create_obj = ModelCreate(
-            name=name,
-            version=body.version or "1.0.0",
-            card=body.card or "",
-            tags=body.tags or [],
-            source_uri=body.url,
-            metadata={}
-        )
-    elif artifact_type == "dataset":
-        create_obj = DatasetCreate(
-            name=name,
-            version=body.version or "1.0.0",
-            description=body.description or "",
-            source_uri=body.url,
-            metadata={}
-        )
-    elif artifact_type == "code":
-        create_obj = CodeCreate(
-            name=name,
-            version=body.version or "1.0.0",
-            repo_uri=body.url,
-            metadata={}
-        )
+    logger.info(
+        "artifacts_list: after name filter count=%d",
+        len(name_filtered),
+    )
+
+    if q.types:
+        allowed = set(q.types)
+        type_filtered = [m for m in name_filtered if infer_type(m) in allowed]
     else:
-        raise HTTPException(status_code=400, detail="Invalid artifact type")
+        type_filtered = name_filtered
 
-    # 4. Create artifact in registry
-    created = _registry.create(create_obj)
+    logger.info(
+        "artifacts_list: after type filter count=%d allowed_types=%s",
+        len(type_filtered),
+        q.types,
+    )
 
-    # 5. NORMALIZE METADATA (THIS IS THE FIX)
-    meta = created.setdefault("metadata", {})
+    start = 0
+    if offset:
+        try:
+            start = int(offset)
+        except Exception:
+            start = 0
 
-    meta["name"] = name
-    meta["type"] = artifact_type
-    meta["source_uri"] = body.url
+    page_size = 1000
+    slice_ = type_filtered[start: start + page_size]
+    next_offset = start + page_size if (start + page_size) < len(type_filtered) else None
 
-    # Optional but safe (some tests look for this)
-    if hasattr(body, "download_url") and body.download_url:
-        meta["download_url"] = body.download_url
+    if next_offset is not None:
+        response.headers["offset"] = str(next_offset)
 
-    return created
+    resp = [
+        ArtifactMetadata(name=m["name"], id=m["id"], type=infer_type(m))
+        for m in slice_
+    ]
+    logger.info(
+        "artifacts_list: response_count=%d ids=%s next_offset=%s",
+        len(resp),
+        [r.id for r in resp],
+        next_offset,
+    )
+    return resp
