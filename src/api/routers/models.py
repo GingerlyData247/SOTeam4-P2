@@ -499,7 +499,12 @@ def artifact_by_name(name: str):
         return (s or "").strip().lower()
 
     target = normalize(name)
-    logger.info("GET /artifact/byName: raw=%s normalized=%s", name, target)
+    logger.warning(
+        "AUTOGRADER_LOOKUP_BY_NAME | requested=%s | registry_names=%s | registry_urls=%s",
+        target,
+        [m["name"] for m in _registry._models],
+        [m.get("source_uri") for m in _registry._models],
+    )
 
     all_items = list(_registry._models)
     matches: List[Dict[str, Any]] = []
@@ -998,7 +1003,13 @@ def artifact_get(
     if not artifact_id:
         raise HTTPException(status_code=400, detail="Artifact ID must be non-empty.")
 
-    logger.info("GET /artifacts/%s/%s", atype, artifact_id)
+    logger.warning(
+        "AUTOGRADER_LOOKUP_BY_ID | requested=%s | registry_ids=%s | registry_names=%s | registry_urls=%s",
+        artifact_id,
+        [m["id"] for m in _registry._models],
+        [m["name"] for m in _registry._models],
+        [m.get("source_uri") for m in _registry._models],
+    )
 
     item = _registry.get(artifact_id)
     if not item:
