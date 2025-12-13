@@ -1122,42 +1122,77 @@ def artifact_delete(artifact_type: str, id: str):
 # ---------------------------------------------------------------------------
 
 
-@router.post("/artifacts", status_code=201)
-def artifact_create(body: ArtifactCreateBody = Body(...)):
+@router.post("/artifacts", status_code=200)
+def artifacts_entrypoint(
+    body: Union[List[ArtifactQuery], ArtifactCreateBody] = Body(...)
+):
     """
-    Create a model, dataset, or code artifact.
+    POST /artifacts serves TWO purposes (per spec & autograder):
 
-    IMPORTANT:
-    - Autograder sends a `name` field even though the spec is ambiguous.
-    - We MUST honor it if present.
-    - `metadata.name` MUST always be populated.
+    1) If body is a LIST → query artifacts
+    2) If body is an OBJECT → create artifact
     """
+
+    # ============================================================
+    # CASE 1: QUERY ARTIFACTS
+    # ============================================================
+    if isinstance(body, list):
+        logger.info("POST /artifacts (query) count=%d", len(body))
+
+        all_items = list(_registry._models)
+        results: List[ArtifactMetadata] = []
+
+        for q in body:
+            name_pattern = q.name
+            allowed_types = set(t.lower() for t in (q.types or []))
+
+            for m in all_items:
+                meta = m.get("metadata") or {}
+                m_type = str(meta.get("type") or "model").lower()
+
+                # type filter
+                if allowed_types and m_type not in allowed_types:
+                    continue
+
+                # name filter
+                if name_pattern == "*" or m.get("name") == name_pattern:
+                    results.append(
+                        ArtifactMetadata(
+                            name=m["name"],
+                            id=m["id"],
+                            type=m_type,  # type: ignore
+                        )
+                    )
+
+        if not results:
+            raise HTTPException(status_code=404, detail="No artifacts found.")
+
+        # sort by numeric id
+        results.sort(key=lambda x: int(x.id))
+        return results
+
+    # ============================================================
+    # CASE 2: CREATE ARTIFACT
+    # ============================================================
+    logger.info("POST /artifacts (create) type=%s url=%s", body.type, body.url)
 
     artifact_type = body.type.lower()
 
-    # 1) Determine final name
     if body.name and body.name.strip():
         final_name = body.name.strip()
     else:
-        # Fallback: infer from URL path segment
         parsed = urlparse(body.url)
-        path = parsed.path.rstrip("/")
-        last = path.split("/")[-1]
-        final_name = last or artifact_type
+        final_name = parsed.path.rstrip("/").split("/")[-1] or artifact_type
 
-    # -------------------------------------------------------------------
-    # MODEL artifacts → use HF ingest pipeline (_ingest_hf_core)
-    # -------------------------------------------------------------------
+    # ------------------ MODEL ------------------
     if artifact_type == "model":
         created = _ingest_hf_core(body.url)
 
-        # Override name everywhere to match the POSTed name
         created["name"] = final_name
         created.setdefault("metadata", {})
         created["metadata"]["name"] = final_name
         created["metadata"]["type"] = "model"
 
-        # Allow download_url override if provided
         if body.download_url:
             created["metadata"]["download_url"] = body.download_url
 
@@ -1173,19 +1208,8 @@ def artifact_create(body: ArtifactCreateBody = Body(...)):
             ),
         )
 
-    # -------------------------------------------------------------------
-    # DATASET + CODE artifacts → simple registry entries
-    # -------------------------------------------------------------------
+    # ---------------- DATASET / CODE ----------------
     if artifact_type in ("dataset", "code"):
-        logger.info(
-            "artifact_create(%s): url=%s final_name=%s",
-            artifact_type,
-            body.url,
-            final_name,
-        )
-
-        # We can reuse ModelCreate for all artifact types; the type is
-        # distinguished via metadata["type"].
         mc = ModelCreate(
             name=final_name,
             version="1.0.0",
@@ -1197,8 +1221,8 @@ def artifact_create(body: ArtifactCreateBody = Body(...)):
 
         created = _registry.create(mc)
         created.setdefault("metadata", {})
-        created["metadata"]["type"] = artifact_type
         created["metadata"]["name"] = final_name
+        created["metadata"]["type"] = artifact_type
 
         if body.download_url:
             created["metadata"]["download_url"] = body.download_url
@@ -1215,9 +1239,5 @@ def artifact_create(body: ArtifactCreateBody = Body(...)):
             ),
         )
 
-    # -------------------------------------------------------------------
-    # Invalid type
-    # -------------------------------------------------------------------
-    logger.warning("artifact_create: unsupported artifact_type=%s", artifact_type)
-    raise HTTPException(status_code=400, detail="Invalid artifact type")
+    raise HTTPException(status_code=400, detail="Invalid artifact type.")
 
