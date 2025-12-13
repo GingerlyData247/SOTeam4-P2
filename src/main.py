@@ -27,7 +27,7 @@ app.add_middleware(DeepASGILogger)
 # -------------------------------------------------------------
 # Add CORS middleware
 # -------------------------------------------------------------
-ALLOWED_ORIGINS = ["http://sot4-model-registry-dev.s3-website.us-east-2.amazonaws.com"
+ALLOWED_ORIGINS = ["http://sot4-model-registry-dev.s3-website.us-east-2.amazonaws.com"]
 # -------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
