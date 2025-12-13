@@ -6,6 +6,7 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlettle.middleware.cors import CORSMiddleware
 from mangum import Mangum
 
 from src.api.routers.models import router as models_router
@@ -26,10 +27,12 @@ app.add_middleware(DeepASGILogger)
 # -------------------------------------------------------------
 # Add CORS middleware
 # -------------------------------------------------------------
+ALLOWED_ORIGINS = ["http://sot4-model-registry-dev.s3-website.us-east-2.amazonaws.com"
+# -------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
