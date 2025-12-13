@@ -1122,10 +1122,10 @@ def artifact_delete(artifact_type: str, id: str):
 # ---------------------------------------------------------------------------
 
 
+from typing import Any
+
 @router.post("/artifacts", status_code=200)
-def artifacts_entrypoint(
-    body: Union[List[ArtifactQuery], ArtifactCreateBody] = Body(...)
-):
+def artifacts_entrypoint(body: Any = Body(...)):
     """
     POST /artifacts serves TWO purposes (per spec & autograder):
 
@@ -1134,15 +1134,20 @@ def artifacts_entrypoint(
     """
 
     # ============================================================
-    # CASE 1: QUERY ARTIFACTS
+    # CASE 1: QUERY ARTIFACTS (body is a LIST)
     # ============================================================
     if isinstance(body, list):
-        logger.info("POST /artifacts (query) count=%d", len(body))
+        try:
+            queries = [ArtifactQuery(**q) for q in body]
+        except Exception:
+            raise HTTPException(status_code=422, detail="Invalid artifact query body")
+
+        logger.info("POST /artifacts (query) count=%d", len(queries))
 
         all_items = list(_registry._models)
         results: List[ArtifactMetadata] = []
 
-        for q in body:
+        for q in queries:
             name_pattern = q.name
             allowed_types = set(t.lower() for t in (q.types or []))
 
@@ -1150,11 +1155,9 @@ def artifacts_entrypoint(
                 meta = m.get("metadata") or {}
                 m_type = str(meta.get("type") or "model").lower()
 
-                # type filter
                 if allowed_types and m_type not in allowed_types:
                     continue
 
-                # name filter
                 if name_pattern == "*" or m.get("name") == name_pattern:
                     results.append(
                         ArtifactMetadata(
@@ -1167,34 +1170,45 @@ def artifacts_entrypoint(
         if not results:
             raise HTTPException(status_code=404, detail="No artifacts found.")
 
-        # sort by numeric id
         results.sort(key=lambda x: int(x.id))
         return results
 
     # ============================================================
-    # CASE 2: CREATE ARTIFACT
+    # CASE 2: CREATE ARTIFACT (body is a DICT)
     # ============================================================
-    logger.info("POST /artifacts (create) type=%s url=%s", body.type, body.url)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="Invalid request body")
 
-    artifact_type = body.type.lower()
+    try:
+        create = ArtifactCreateBody(**body)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors())
 
-    if body.name and body.name.strip():
-        final_name = body.name.strip()
+    logger.info(
+        "POST /artifacts (create) type=%s url=%s",
+        create.type,
+        create.url,
+    )
+
+    artifact_type = create.type.lower()
+
+    if create.name and create.name.strip():
+        final_name = create.name.strip()
     else:
-        parsed = urlparse(body.url)
+        parsed = urlparse(create.url)
         final_name = parsed.path.rstrip("/").split("/")[-1] or artifact_type
 
-    # ------------------ MODEL ------------------
+    # ---------------- MODEL ----------------
     if artifact_type == "model":
-        created = _ingest_hf_core(body.url)
+        created = _ingest_hf_core(create.url)
 
         created["name"] = final_name
         created.setdefault("metadata", {})
         created["metadata"]["name"] = final_name
         created["metadata"]["type"] = "model"
 
-        if body.download_url:
-            created["metadata"]["download_url"] = body.download_url
+        if create.download_url:
+            created["metadata"]["download_url"] = create.download_url
 
         return Artifact(
             metadata=ArtifactMetadata(
@@ -1203,12 +1217,12 @@ def artifacts_entrypoint(
                 type="model",
             ),
             data=ArtifactData(
-                url=body.url,
+                url=create.url,
                 download_url=created["metadata"].get("download_url"),
             ),
         )
 
-    # ---------------- DATASET / CODE ----------------
+    # ------------ DATASET / CODE ------------
     if artifact_type in ("dataset", "code"):
         mc = ModelCreate(
             name=final_name,
@@ -1216,7 +1230,7 @@ def artifacts_entrypoint(
             card="",
             tags=[],
             metadata={},
-            source_uri=body.url,
+            source_uri=create.url,
         )
 
         created = _registry.create(mc)
@@ -1224,8 +1238,8 @@ def artifacts_entrypoint(
         created["metadata"]["name"] = final_name
         created["metadata"]["type"] = artifact_type
 
-        if body.download_url:
-            created["metadata"]["download_url"] = body.download_url
+        if create.download_url:
+            created["metadata"]["download_url"] = create.download_url
 
         return Artifact(
             metadata=ArtifactMetadata(
@@ -1234,10 +1248,9 @@ def artifacts_entrypoint(
                 type=artifact_type,
             ),
             data=ArtifactData(
-                url=body.url,
+                url=create.url,
                 download_url=created["metadata"].get("download_url"),
             ),
         )
 
     raise HTTPException(status_code=400, detail="Invalid artifact type.")
-
