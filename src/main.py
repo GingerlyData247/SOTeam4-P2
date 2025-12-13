@@ -6,7 +6,7 @@ load_dotenv()
 
 from fastapi import FastAPI
 # from fastapi.middleware.cors import CORSMiddleware
-from starlettle.middleware.cors import CORSMiddleware
+from starlette.middleware.cors import CORSMiddleware
 from mangum import Mangum
 
 from src.api.routers.models import router as models_router
