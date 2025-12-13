@@ -489,62 +489,48 @@ def artifact_by_regex(body: ArtifactRegex):
 @router.get("/artifact/byName/{name:path}", response_model=List[ArtifactMetadata])
 def artifact_by_name(name: str):
     """
-    Return all artifacts whose stored name EXACTLY equals the provided name
-    (after simple strip()).
-
-    Spec / autograder behavior:
-    - Always returns 200 with a list (possibly empty).
-    - Does NOT raise 404 when no artifacts match; instead returns [].
+    Return all artifacts whose stored name matches the provided name.
+    Behavior:
+      • Case-insensitive, trimmed comparison
+      • Returns 200 with [] if none found
+      • Matches across all artifact types
     """
-    raw_name = name
-    normalized = (name or "").strip()
-    logger.info(
-        "GET /artifact/byName: raw_name=%s normalized_name=%s",
-        raw_name,
-        normalized,
-    )
+    def normalize(s: str) -> str:
+        return (s or "").strip().lower()
 
-    # Work on a stable snapshot
+    target = normalize(name)
+    logger.info("GET /artifact/byName: raw=%s normalized=%s", name, target)
+
     all_items = list(_registry._models)
+    matches: List[Dict[str, Any]] = []
 
-    matches: List[Dict[str, Any]] = [
-        m for m in all_items if (m.get("name", "") or "").strip() == normalized
-    ]
+    for art in all_items:
+        a_name = normalize(art.get("name"))
+        if a_name == target or a_name.endswith("/" + target):
+            matches.append(art)
 
-    logger.info(
-        "artifact_by_name: total_items=%d match_count=%d match_ids=%s",
-        len(all_items),
-        len(matches),
-        [m.get("id") for m in matches],
-    )
-
-    # Spec-aligned: 200 with [] is okay when there are no matches.
-    if not matches:
-        logger.info("artifact_by_name: no matches for name=%s", normalized)
-        return []
+    logger.info("artifact_by_name: %d matches for '%s'", len(matches), target)
 
     def infer_type(entry: Dict[str, Any]) -> ArtifactTypeLiteral:
         meta = entry.get("metadata") or {}
         t = str(meta.get("type") or "").lower()
         return t if t in ("model", "dataset", "code") else "model"
 
-    # Keep deterministic ordering by id
+    # deterministic ordering by id
     try:
-        matches_sorted = sorted(matches, key=lambda x: int(str(x["id"])))
+        matches = sorted(matches, key=lambda m: int(str(m["id"])))
     except Exception:
-        matches_sorted = sorted(matches, key=lambda x: str(x["id"]))
+        matches = sorted(matches, key=lambda m: str(m["id"]))
 
-    response = [
-        ArtifactMetadata(name=m["name"], id=m["id"], type=infer_type(m))
-        for m in matches_sorted
+    return [
+        ArtifactMetadata(
+            id=m["id"],
+            name=m["name"],
+            type=infer_type(m),
+        )
+        for m in matches
     ]
 
-    logger.info(
-        "artifact_by_name: response_count=%d response_ids=%s",
-        len(response),
-        [r.id for r in response],
-    )
-    return response
 
 # -----------------------
 # model static routes
@@ -986,92 +972,58 @@ def artifact_create(
 @router.get(
     "/artifacts/{artifact_type}/{id}",
     response_model=Artifact,
-    summary="Interact with the artifact with this id. (BASELINE)",
-    description="Return this artifact.",
+    summary="Return this artifact.",
+    description="Return the artifact with this ID, ignoring artifact_type mismatch per spec.",
     operation_id="ArtifactRetrieve",
 )
 def artifact_get(
-    artifact_type: ArtifactTypeLiteral = Path(
-        ..., description="Type of artifact to fetch"
-    ),
-    id: str = Path(
-        ..., description="ID of artifact to fetch"
-    ),
+    artifact_type: ArtifactTypeLiteral = Path(..., description="Type of artifact"),
+    id: str = Path(..., description="Artifact ID"),
 ):
     """
     Fetch a single artifact by type and ID.
-
     Spec alignment:
-    - artifact_type must be one of: model, dataset, code (case-insensitive).
-    - id follows the ArtifactID schema (alphanumeric/hyphen); we do NOT
-      enforce "numeric only" anymore, to match the spec and autograder.
+      • Accept alphanumeric / hyphen IDs (not numeric-only)
+      • 404 when ID is syntactically valid but not found
+      • artifact_type is informational only
     """
-    # Normalize artifact_type
     atype = str(artifact_type).lower()
     if atype not in ("model", "dataset", "code"):
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"Invalid artifact_type '{artifact_type}', must be one of: "
-                "model, dataset, code."
-            ),
+            detail=f"Invalid artifact_type '{artifact_type}', must be one of: model, dataset, code.",
         )
 
-    # Normalize ID; allow any non-empty string (spec allows [A-Za-z0-9-]+)
     artifact_id = str(id).strip()
     if not artifact_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Artifact ID must be a non-empty string.",
-        )
+        raise HTTPException(status_code=400, detail="Artifact ID must be non-empty.")
 
     logger.info("GET /artifacts/%s/%s", atype, artifact_id)
 
-    # Delegate existence to the registry
     item = _registry.get(artifact_id)
     if not item:
-        logger.warning(
-            "artifact_get: not found: artifact_type=%s id=%s",
-            atype,
-            artifact_id,
-        )
-        # Spec/Autograder: syntactically valid but unknown ID → 404
+        logger.warning("artifact_get: not found id=%s", artifact_id)
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
-    # Infer stored type from metadata (fall back to requested type)
     meta = item.get("metadata") or {}
-    stored_type = str(meta.get("type") or "").lower()
-    if stored_type not in ("model", "dataset", "code"):
-        stored_type = atype
-
-    # Derive source URL / download URL consistent with your existing logic
+    stored_type = str(meta.get("type") or atype).lower()
+    name = item.get("name")
     source_uri = item.get("source_uri") or meta.get("source_uri")
-
-    if stored_type == "model":
-        # Hugging Face models are usually identified by name
-        url = source_uri or f"https://huggingface.co/{item['name']}"
-    else:
-        # For datasets/code, just use source_uri or name as the URL
-        url = source_uri or item["name"]
-
+    url = source_uri or name
     download_url = meta.get("download_url")
-
-    logger.info(
-        "artifact_get: id=%s stored_type=%s url=%s has_download_url=%s",
-        artifact_id,
-        stored_type,
-        url,
-        download_url is not None,
-    )
 
     return Artifact(
         metadata=ArtifactMetadata(
-            name=item["name"],
             id=item["id"],
-            type=stored_type,  # type: ignore[arg-type]
+            name=name,
+            type=stored_type,
         ),
-        data=ArtifactData(url=url, download_url=download_url),
+        data=ArtifactData(
+            url=url,
+            download_url=download_url if download_url is not None else None,
+        ),
     )
+
 
 
 
