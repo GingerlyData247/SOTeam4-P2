@@ -681,7 +681,7 @@ async def rate_model_artifact(id: str):
 def artifact_lineage(id: str):
     logger.info("GET /artifact/model/%s/lineage", id)
 
-    item = _resolve_id_or_index(_registry, id)
+    item = _registry.get(id)
     if not item:
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
