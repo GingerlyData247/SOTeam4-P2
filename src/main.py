@@ -4,14 +4,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, Response, Request
-# from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Response
 from starlette.middleware.cors import CORSMiddleware
 from mangum import Mangum
 
 from src.api.routers.models import router as models_router
 from src.api.routes_s3 import router as s3_router
 from src.api.middleware.log_requests import DeepASGILogger
+
+# -------------------------------------------------------------
+# Constants
+# -------------------------------------------------------------
+FRONTEND_ORIGIN = "http://sot4-model-registry-dev.s3-website.us-east-2.amazonaws.com"
+ALLOWED_ORIGINS = [FRONTEND_ORIGIN]
 
 # -------------------------------------------------------------
 # Create the FastAPI app FIRST
@@ -24,11 +29,8 @@ print(">>> MIDDLEWARE ACTIVE <<<")
 # Add middleware SECOND
 # -------------------------------------------------------------
 app.add_middleware(DeepASGILogger)
-# -------------------------------------------------------------
-# Add CORS middleware
-# -------------------------------------------------------------
-ALLOWED_ORIGINS = ["http://sot4-model-registry-dev.s3-website.us-east-2.amazonaws.com"]
-# -------------------------------------------------------------
+
+# CORS middleware (backend is source of truth; API Gateway CORS is cleared)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -43,6 +45,9 @@ app.add_middleware(
 app.include_router(models_router, prefix="/api")
 app.include_router(s3_router)
 
+# -------------------------------------------------------------
+# Global preflight handler (prevents OPTIONS -> 500 and guarantees headers)
+# -------------------------------------------------------------
 @app.options("/{path:path}")
 async def preflight_handler(path: str):
     return Response(
