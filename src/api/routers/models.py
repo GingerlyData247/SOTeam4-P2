@@ -679,42 +679,22 @@ async def rate_model_artifact(id: str):
 
 @router.get("/artifact/model/{id}/lineage")
 def artifact_lineage(id: str):
-#    id = validate_artifact_id(id)
-    
     logger.info("GET /artifact/model/%s/lineage", id)
-    try:
-        g = _registry.get_lineage_graph(id)
-    except KeyError:
-        logger.warning("artifact_lineage: artifact not found: id=%s", id)
+
+    item = _resolve_id_or_index(_registry, id)
+    if not item:
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
-    nodes_out = [
-        {
-            "artifact_id": n["id"],
-            "name": n["name"],
-            "source": "config_json",
-            "metadata": {},
-        }
-        for n in g.get("nodes", [])
-    ]
+    try:
+        g = _registry.get_lineage_graph(item["id"])
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
-    edges_out = [
-        {
-            "from_node_artifact_id": e["parent"],
-            "to_node_artifact_id": e["child"],
-            "relationship": "base_model",
-        }
-        for e in g.get("edges", [])
-    ]
-
-    logger.info(
-        "artifact_lineage: id=%s nodes=%d edges=%d",
-        id,
-        len(nodes_out),
-        len(edges_out),
-    )
-    return {"nodes": nodes_out, "edges": edges_out}
-
+    # RegistryService already returns OpenAPI-compliant lineage
+    return {
+        "nodes": g.get("nodes", []),
+        "edges": g.get("edges", []),
+    }
 
 @router.post("/artifact/model/{id}/license-check")
 def artifact_license_check(id: str, body: SimpleLicenseCheckRequest):
