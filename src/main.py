@@ -44,8 +44,15 @@ app.include_router(models_router, prefix="/api")
 app.include_router(s3_router)
 
 @app.options("/{path:path}")
-async def preflight(path: str, request: Request):
-    return Response(status_code=204)
+async def preflight_handler(path: str):
+    return Response(
+        status_code=204,
+        headers={
+            "Access-Control-Allow-Origin": FRONTEND_ORIGIN,
+            "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+            "Access-Control-Allow-Headers": "content-type,authorization",
+        },
+    )
 
 # -------------------------------------------------------------
 # Extra debugging endpoint
