@@ -44,6 +44,42 @@ _scoring = ScoringService()
 _storage = get_storage()
 
 # ---------------------------------------------------------------------------
+# URL Security Validation
+# ---------------------------------------------------------------------------
+ALLOWED_DOMAINS = {
+    "huggingface.co",
+    "www.huggingface.co",
+    "github.com",
+    "www.github.com",
+}
+
+ALLOWED_SCHEMES = {"https"}
+
+def validate_external_url(url: str) -> None:
+    parsed = urlparse(url)
+
+    # Enforce scheme
+    if parsed.scheme not in ALLOWED_SCHEMES:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid URL scheme. Only HTTPS is allowed."
+        )
+
+    # Enforce domain whitelist
+    if parsed.netloc not in ALLOWED_DOMAINS:
+        raise HTTPException(
+            status_code=400,
+            detail="URL domain not allowed."
+        )
+
+    # Block local paths explicitly
+    if parsed.scheme == "file":
+        raise HTTPException(
+            status_code=400,
+            detail="Local file paths are not allowed."
+        )
+
+# ---------------------------------------------------------------------------
 # Simple schema helpers
 # ---------------------------------------------------------------------------
 
