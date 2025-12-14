@@ -926,6 +926,16 @@ def artifact_create(
     ),
     body: ArtifactData = Body(...),
 ):
+
+    MAX_URL_LENGTH = 2048  # enforce strict upper bound at API boundary
+    
+    if body.url and len(body.url) > MAX_URL_LENGTH:
+        raise HTTPException(
+            status_code=413,
+            detail=f"URL exceeds maximum length of {MAX_URL_LENGTH} characters.",
+        )
+
+    
     logger.info(
         "POST /artifact/%s: url=%s name=%s download_url=%s",
         artifact_type,
