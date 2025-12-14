@@ -44,6 +44,42 @@ _scoring = ScoringService()
 _storage = get_storage()
 
 # ---------------------------------------------------------------------------
+# URL Security Validation
+# ---------------------------------------------------------------------------
+ALLOWED_DOMAINS = {
+    "huggingface.co",
+    "www.huggingface.co",
+    "github.com",
+    "www.github.com",
+}
+
+ALLOWED_SCHEMES = {"https"}
+
+def validate_external_url(url: str) -> None:
+    parsed = urlparse(url)
+
+    # Enforce scheme
+    if parsed.scheme not in ALLOWED_SCHEMES:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid URL scheme. Only HTTPS is allowed."
+        )
+
+    # Enforce domain whitelist
+    if parsed.netloc not in ALLOWED_DOMAINS:
+        raise HTTPException(
+            status_code=400,
+            detail="URL domain not allowed."
+        )
+
+    # Block local paths explicitly
+    if parsed.scheme == "file":
+        raise HTTPException(
+            status_code=400,
+            detail="Local file paths are not allowed."
+        )
+
+# ---------------------------------------------------------------------------
 # Simple schema helpers
 # ---------------------------------------------------------------------------
 
@@ -553,6 +589,8 @@ def artifact_by_name(name: str):
 
 @router.get("/artifact/model/{id}/rate", response_model=ModelRating)
 async def rate_model_artifact(id: str):
+    id = validate_artifact_id(id)
+    
     logger.info("GET /artifact/model/%s/rate", id)
 
     # 1. Look up artifact in the registry
@@ -641,6 +679,8 @@ async def rate_model_artifact(id: str):
 
 @router.get("/artifact/model/{id}/lineage")
 def artifact_lineage(id: str):
+    id = validate_artifact_id(id)
+    
     logger.info("GET /artifact/model/%s/lineage", id)
     try:
         g = _registry.get_lineage_graph(id)
@@ -678,11 +718,15 @@ def artifact_lineage(id: str):
 
 @router.post("/artifact/model/{id}/license-check")
 def artifact_license_check(id: str, body: SimpleLicenseCheckRequest):
+    id = validate_artifact_id(id)
+    
     logger.info(
         "POST /artifact/model/%s/license-check github_url=%s",
         id,
         body.github_url,
     )
+    validate_external_url(body.github_url)
+    
     item = _registry.get(id)
     if not item:
         logger.warning("artifact_license_check: artifact not found: id=%s", id)
@@ -738,6 +782,8 @@ def artifact_cost(
     id: str = Path(..., description="Numeric artifact ID"),
     dependency: bool = Query(False),
 ):
+    id = validate_artifact_id(id)
+    
     logger.info("GET /artifact/%s/%s/cost?dependency=%s", artifact_type, id, dependency)
 
     # 1) Validate artifact_type
@@ -875,6 +921,16 @@ def artifact_create(
     ),
     body: ArtifactData = Body(...),
 ):
+
+    MAX_URL_LENGTH = 2048  # enforce strict upper bound at API boundary
+    
+    if body.url and len(body.url) > MAX_URL_LENGTH:
+        raise HTTPException(
+            status_code=413,
+            detail=f"URL exceeds maximum length of {MAX_URL_LENGTH} characters.",
+        )
+
+    
     logger.info(
         "POST /artifact/%s: url=%s name=%s download_url=%s",
         artifact_type,
@@ -882,6 +938,7 @@ def artifact_create(
         body.name,
         body.download_url,
     )
+    validate_external_url(body.url)
 
     # ---------------------------------------------------------------------
     # Determine final artifact name
@@ -998,6 +1055,9 @@ def artifact_get(
         ..., description="ID of artifact to fetch"
     ),
 ):
+    
+    id = validate_artifact_id(id)
+    
     """
     Fetch a single artifact by type and ID.
 
@@ -1077,6 +1137,8 @@ def artifact_get(
 
 @router.put("/artifacts/{artifact_type}/{id}", response_model=Artifact)
 def artifact_update(artifact_type: str, id: str, body: Artifact):
+    id = validate_artifact_id(id)
+    
     logger.info(
         "PUT /artifacts/%s/%s: body_id=%s body_name=%s",
         artifact_type,
@@ -1130,6 +1192,8 @@ def artifact_update(artifact_type: str, id: str, body: Artifact):
 
 @router.delete("/artifacts/{artifact_type}/{id}")
 def artifact_delete(artifact_type: str, id: str):
+    id = validate_artifact_id(id)
+    
     logger.info("DELETE /artifacts/%s/%s", artifact_type, id)
     ok = _registry.delete(id)
     if not ok:
