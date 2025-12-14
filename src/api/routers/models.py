@@ -600,6 +600,8 @@ def artifact_by_name(name: str):
 
 @router.get("/artifact/model/{id}/rate", response_model=ModelRating)
 async def rate_model_artifact(id: str):
+    id = validate_artifact_id(id)
+    
     logger.info("GET /artifact/model/%s/rate", id)
 
     # 1. Look up artifact in the registry
@@ -689,6 +691,8 @@ async def rate_model_artifact(id: str):
 
 @router.get("/artifact/model/{id}/lineage")
 def artifact_lineage(id: str):
+    id = validate_artifact_id(id)
+    
     logger.info("GET /artifact/model/%s/lineage", id)
     item = _resolve_id_or_index(_registry, id)
     if not item:
@@ -726,11 +730,14 @@ def artifact_lineage(id: str):
 
 @router.post("/artifact/model/{id}/-check")
 def artifact__check(id: str, body: SimpleCheckRequest):
+    id = validate_artifact_id(id)
     logger.info(
         "POST /artifact/model/%s/-check github_url=%s",
         id,
         body.github_url,
     )
+    validate_external_url(body.github_url)
+    
     item = _registry.get(id)
     if not item:
         logger.warning("artifact__check: artifact not found: id=%s", id)
@@ -786,6 +793,8 @@ def artifact_cost(
     id: str = Path(..., description="Numeric artifact ID"),
     dependency: bool = Query(False),
 ):
+    id = validate_artifact_id(id)
+    
     logger.info("GET /artifact/%s/%s/cost?dependency=%s", artifact_type, id, dependency)
 
     # 1) Validate artifact_type
@@ -943,6 +952,7 @@ def artifact_create(
         body.name,
         body.download_url,
     )
+    validate_external_url(body.url)
 
     # ---------------------------------------------------------------------
     # Determine final artifact name
@@ -1055,6 +1065,9 @@ def artifact_get(
     artifact_type: ArtifactTypeLiteral = Path(..., description="Type of artifact"),
     id: str = Path(..., description="Artifact ID"),
 ):
+    
+    id = validate_artifact_id(id)
+    
     """
     Fetch a single artifact by type and ID.
     Spec alignment:
@@ -1111,6 +1124,8 @@ def artifact_get(
 
 @router.put("/artifacts/{artifact_type}/{id}", response_model=Artifact)
 def artifact_update(artifact_type: str, id: str, body: Artifact):
+    id = validate_artifact_id(id)
+    
     logger.info(
         "PUT /artifacts/%s/%s: body_id=%s body_name=%s",
         artifact_type,
@@ -1164,6 +1179,8 @@ def artifact_update(artifact_type: str, id: str, body: Artifact):
 
 @router.delete("/artifacts/{artifact_type}/{id}")
 def artifact_delete(artifact_type: str, id: str):
+    id = validate_artifact_id(id)
+    
     logger.info("DELETE /artifacts/%s/%s", artifact_type, id)
     item = _resolve_id_or_index(_registry, id)
     if not item:
