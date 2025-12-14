@@ -116,75 +116,75 @@ class RegistryService:
     # LINEAGE GRAPH (Hardened against bad data)
     # ------------------------------------------------------------------ #
     def get_lineage_graph(self, id_: str) -> Dict[str, Any]:
-    self._load()
-
-    root = self.get(id_)
-    if root is None:
-        raise KeyError(f"Model {id_} not found")
-
-    nodes: Dict[str, Dict[str, Any]] = {}
-    edges: List[Dict[str, str]] = []
-
-    root_id = str(root["id"])
-    root_name = root["name"]
-
-    # --- Always include root node FIRST (frontend requirement)
-    nodes[root_id] = {
-        "artifact_id": root_id,
-        "name": root_name,
-        "source": "config_json",
-        "metadata": {}
-    }
-
-    # --- 1. Extract HF parent if present
-    meta = root.get("metadata") or {}
-    hf_parent = meta.get("base_model_name_or_path")
-
-    if hf_parent:
-        hf_parent = hf_parent.replace("https://huggingface.co/", "").strip()
-
-        # --- 2. Check registry
-        parent_model = None
-        for m in self._models:
-            if m.get("name") == hf_parent:
-                parent_model = m
-                break
-
-        if parent_model:
-            pid = str(parent_model["id"])
-
-            nodes[pid] = {
-                "artifact_id": pid,
-                "name": parent_model["name"],
-                "source": "config_json",
-                "metadata": {}
-            }
-
-            edges.append({
-                "from_node_artifact_id": pid,
-                "to_node_artifact_id": root_id,
-                "relationship": "base_model"
-            })
-
-        else:
-            # --- LEVEL 2: placeholder parent
-            external_id = f"external:{hf_parent}"
-
-            nodes[external_id] = {
-                "artifact_id": external_id,
-                "name": hf_parent,
-                "source": "config_json",
-                "metadata": {"external": True}
-            }
-
-            edges.append({
-                "from_node_artifact_id": external_id,
-                "to_node_artifact_id": root_id,
-                "relationship": "base_model"
-            })
-
-    return {
-        "nodes": list(nodes.values()),
-        "edges": edges
-    }
+        self._load()
+    
+        root = self.get(id_)
+        if root is None:
+            raise KeyError(f"Model {id_} not found")
+    
+        nodes: Dict[str, Dict[str, Any]] = {}
+        edges: List[Dict[str, str]] = []
+    
+        root_id = str(root["id"])
+        root_name = root["name"]
+    
+        # --- Always include root node FIRST (frontend requirement)
+        nodes[root_id] = {
+            "artifact_id": root_id,
+            "name": root_name,
+            "source": "config_json",
+            "metadata": {}
+        }
+    
+        # --- 1. Extract HF parent if present
+        meta = root.get("metadata") or {}
+        hf_parent = meta.get("base_model_name_or_path")
+    
+        if hf_parent:
+            hf_parent = hf_parent.replace("https://huggingface.co/", "").strip()
+    
+            # --- 2. Check registry
+            parent_model = None
+            for m in self._models:
+                if m.get("name") == hf_parent:
+                    parent_model = m
+                    break
+    
+            if parent_model:
+                pid = str(parent_model["id"])
+    
+                nodes[pid] = {
+                    "artifact_id": pid,
+                    "name": parent_model["name"],
+                    "source": "config_json",
+                    "metadata": {}
+                }
+    
+                edges.append({
+                    "from_node_artifact_id": pid,
+                    "to_node_artifact_id": root_id,
+                    "relationship": "base_model"
+                })
+    
+            else:
+                # --- LEVEL 2: placeholder parent
+                external_id = f"external:{hf_parent}"
+    
+                nodes[external_id] = {
+                    "artifact_id": external_id,
+                    "name": hf_parent,
+                    "source": "config_json",
+                    "metadata": {"external": True}
+                }
+    
+                edges.append({
+                    "from_node_artifact_id": external_id,
+                    "to_node_artifact_id": root_id,
+                    "relationship": "base_model"
+                })
+    
+        return {
+            "nodes": list(nodes.values()),
+            "edges": edges
+        }
 
