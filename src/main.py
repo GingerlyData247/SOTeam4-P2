@@ -44,7 +44,7 @@ app.include_router(models_router, prefix="/api")
 app.include_router(s3_router)
 
 @app.options("/{path:path}")
-async def preflight(path: str, request: Request):
+async def preflight(path: str):
     return Response(status_code=204)
 
 # -------------------------------------------------------------
