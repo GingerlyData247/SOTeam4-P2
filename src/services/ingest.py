@@ -1,36 +1,49 @@
 from __future__ import annotations
 from typing import Dict, Any
-from .scoring import ScoringService, NON_LATENCY
+from .scoring import ScoringService
 from .registry import RegistryService
 from ..schemas.models import ModelCreate, ModelOut
+from src.utils.hf_normalize import normalize_hf_id
 from src.metrics.treescore import extract_parents_from_resource
+
 
 class IngestService:
     def __init__(self, registry: RegistryService):
         self._registry = registry
         self._scoring = ScoringService()
 
-    def ingest_hf(self, name_or_url: str) -> ModelOut:
-        # Normalize into resource dict expected by metrics
-        name = name_or_url.split("huggingface.co/")[-1] if "huggingface.co" in name_or_url else name_or_url
-        resource = {"name": name, "url": f"https://huggingface.co/{name}"}
-        scores = self._scoring.rate(resource)
+    def ingest_hf(self, *, final_name: str, url: str) -> ModelOut:
+        """
+        Phase 2–correct HF ingest:
+        - trusts caller-provided name
+        - no ingest gating
+        - full scoring-compatible resource
+        """
 
-        # Gate: each NON-LATENCY metric must be >= 0.5 before we ingest
-        for metric_name in NON_LATENCY:
-            if scores["subs"].get(metric_name, 0.0) < 0.5:
-                raise ValueError(f"Ingest rejected: {metric_name}={scores['subs'].get(metric_name):.2f} < 0.50")
-        
-        # Use the enriched `resource` to derive lineage parents for this model
+        hf_id = normalize_hf_id(url)
+
+        resource: Dict[str, Any] = {
+            "name": final_name,
+            "url": f"https://huggingface.co/{hf_id}",
+            "artifact_type": "model",
+        }
+
+        # Compute rating (no gate!)
+        rating = self._scoring.rate(resource)
+
+        # Extract lineage AFTER resource is fully built
         parents = extract_parents_from_resource(resource)
-    
-        # If accepted, create minimal registry record (artifacts can be uploaded later)
+
         mc = ModelCreate(
-            name=name, 
-            version="1.0.0", 
-            card="", 
-            tags=["ingested", "hf"], 
+            name=final_name,
+            version="1.0.0",
+            card="",
+            tags=["ingested", "hf"],
             source_uri=resource["url"],
-            metadata={"parents": parents},      # <- lineage data stored here
+            metadata={
+                **rating,
+                "parents": parents,
+            },
         )
+
         return self._registry.create(mc)
