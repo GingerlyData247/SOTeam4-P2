@@ -116,96 +116,75 @@ class RegistryService:
     # LINEAGE GRAPH (Hardened against bad data)
     # ------------------------------------------------------------------ #
     def get_lineage_graph(self, id_: str) -> Dict[str, Any]:
-        self._load()
+    self._load()
 
-        # 1) Locate root model
-        root = self.get(id_)
-        if root is None:
-            raise KeyError(f"Model {id_} not found")
+    root = self.get(id_)
+    if root is None:
+        raise KeyError(f"Model {id_} not found")
 
-        # 2) Build helper maps
-        id_map: Dict[str, Dict[str, Any]] = {}
-        name_map: Dict[str, Dict[str, Any]] = {}
-        parents_of: Dict[str, List[str]] = {}
+    nodes: Dict[str, Dict[str, Any]] = {}
+    edges: List[Dict[str, str]] = []
 
+    root_id = str(root["id"])
+    root_name = root["name"]
+
+    # --- Always include root node FIRST (frontend requirement)
+    nodes[root_id] = {
+        "artifact_id": root_id,
+        "name": root_name,
+        "source": "config_json",
+        "metadata": {}
+    }
+
+    # --- 1. Extract HF parent if present
+    meta = root.get("metadata") or {}
+    hf_parent = meta.get("base_model_name_or_path")
+
+    if hf_parent:
+        hf_parent = hf_parent.replace("https://huggingface.co/", "").strip()
+
+        # --- 2. Check registry
+        parent_model = None
         for m in self._models:
-            # SAFETY CHECK: Skip malformed entries
-            if not isinstance(m, dict): continue
-            
-            # Safely extract ID and Name
-            mid = str(m.get("id", ""))
-            name = m.get("name")
-            if not mid or not name: continue
+            if m.get("name") == hf_parent:
+                parent_model = m
+                break
 
-            id_map[mid] = m
-            name_map[name] = m
+        if parent_model:
+            pid = str(parent_model["id"])
 
-            # Safely extract parents
-            meta = m.get("metadata")
-            if not isinstance(meta, dict): 
-                meta = {}
-            
-            parents = meta.get("parents")
-            if not isinstance(parents, list):
-                parents = []
+            nodes[pid] = {
+                "artifact_id": pid,
+                "name": parent_model["name"],
+                "source": "config_json",
+                "metadata": {}
+            }
 
-            # Normalize parents to list of strings
-            parents_of[mid] = [str(p) for p in parents if p]
+            edges.append({
+                "from_node_artifact_id": pid,
+                "to_node_artifact_id": root_id,
+                "relationship": "base_model"
+            })
 
-        # 3) Build children map
-        children_of: Dict[str, List[str]] = {}
-        for child_id, parent_names in parents_of.items():
-            for pname in parent_names:
-                if pname in name_map:
-                    parent_model = name_map[pname]
-                    pid = str(parent_model["id"])
-                    children_of.setdefault(pid, []).append(child_id)
+        else:
+            # --- LEVEL 2: placeholder parent
+            external_id = f"external:{hf_parent}"
 
-        # 4) BFS
-        visited = set()
-        nodes: Dict[str, Dict[str, Any]] = {}
-        edges: List[Dict[str, str]] = []
+            nodes[external_id] = {
+                "artifact_id": external_id,
+                "name": hf_parent,
+                "source": "config_json",
+                "metadata": {"external": True}
+            }
 
-        root_id = str(root["id"])
-        queue: List[str] = [root_id]
-        visited.add(root_id)
+            edges.append({
+                "from_node_artifact_id": external_id,
+                "to_node_artifact_id": root_id,
+                "relationship": "base_model"
+            })
 
-        while queue:
-            cur_id = queue.pop(0)
-            if cur_id not in id_map: continue
-                
-            cur_model = id_map[cur_id]
-            nodes[cur_id] = {"id": cur_id, "name": cur_model["name"]}
+    return {
+        "nodes": list(nodes.values()),
+        "edges": edges
+    }
 
-            # Process Parents
-            current_parents = parents_of.get(cur_id, [])
-            for pname in current_parents:
-                if pname in name_map:
-                    p_model = name_map[pname]
-                    pid = str(p_model["id"])
-                    
-                    nodes[pid] = {"id": pid, "name": p_model["name"]}
-                    edges.append({"parent": pid, "child": cur_id})
-                    
-                    if pid not in visited:
-                        visited.add(pid)
-                        queue.append(pid)
-
-            # Process Children
-            current_children = children_of.get(cur_id, [])
-            for child_id in current_children:
-                if child_id in id_map:
-                    c_model = id_map[child_id]
-                    
-                    nodes[child_id] = {"id": child_id, "name": c_model["name"]}
-                    edges.append({"parent": cur_id, "child": child_id})
-                    
-                    if child_id not in visited:
-                        visited.add(child_id)
-                        queue.append(child_id)
-
-        return {
-            "root_id": root_id,
-            "nodes": list(nodes.values()),
-            "edges": edges,
-        }
