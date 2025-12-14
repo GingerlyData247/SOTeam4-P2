@@ -88,6 +88,12 @@
         border-radius: 10px;
         padding: 1rem;
         margin-bottom: 0.5rem;
+        background: #fff;
+      }
+      .search-status {
+        margin-top: 10px;
+        font-style: italic;
+        color: #666;
       }
     </style>
   </head>
@@ -120,9 +126,14 @@
       <h2>Results</h2>
       <div id="output">Awaiting input...</div>
 
+      <h2>Search Models</h2>
       <input id="search-input" type="text" placeholder="Search models (regex)" />
       <button id="search-btn">Search</button>
       <button id="list-models-btn">List All Models</button>
+
+      <div id="search-status" class="search-status"></div>
+      
+      <div id="models-container"></div>
 
       <h3>License Check</h3>
 
@@ -147,18 +158,10 @@
         style="white-space: pre-wrap; margin-top: 10px;"
       ></div>
 
-      <div
-        id="model-list-display"
-        style="white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; margin-top: 10px;"
-      ></div>
-
-      <button id="load-more-btn" style="display:none">Load More</button>
       <button id="reset-btn" style="background:#dc2626;">Reset Registry</button>
 
-      <div id="models-container"></div>
-
       <h2>Lineage</h2>
-      <div id="lineage-view">(Select a model to view its lineage.)</div>
+      <div id="lineage-view">(Select a model above to view its lineage.)</div>
     </main>
 
     <footer>© 2025 Team 4 • Purdue ECE/SWE 45000 • Phase 2</footer>
@@ -206,13 +209,11 @@
         out.textContent = "Registering artifact and computing metrics...";
 
         try {
-          // 1) Register artifact via POST /api/artifact/model
           const createRes = await fetch(`${API_BASE}/api/artifact/model`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
             },
-            // Backend expects ArtifactData: { url: ..., name?: ... }
             body: JSON.stringify({ url: hfUrl })
           });
 
@@ -229,17 +230,14 @@
           }
 
           const artifact = await createRes.json();
-          // UPDATE: Backend returns Artifact model: { metadata: { id, name, type }, data: { ... } }
-          // We must check artifact.metadata.id
           const artifactId = artifact?.metadata?.id || artifact?.id;
 
           if (!artifactId) {
             out.textContent = "Artifact created but no id returned.";
-            console.error("Full artifact response:", artifact);
             return;
           }
 
-          // 2) Compute rating via GET /api/artifact/model/{id}/rate
+          // 2) Compute rating
           let rating = null;
           try {
             const rateRes = await fetch(
@@ -252,14 +250,12 @@
             console.error("Rating error:", e);
           }
 
-          // 3) Extract download URL. 
-          // New structure prioritizes: artifact.data.download_url
+          // 3) Extract download URL
           let downloadUrl =
             artifact?.data?.download_url ||
             artifact?.metadata?.download_url ||
             null;
 
-          // Fallback fetch if missing
           if (!downloadUrl) {
             try {
               const getRes = await fetch(
@@ -298,113 +294,89 @@
         }
       }
 
-      // "Get Score" just reuses analyze pipeline
       async function rateUrl() {
         return analyzeUrl();
       }
 
       /* ----------------------------
-         Artifact listing + lineage
+         List / Search Models Helper
          ---------------------------- */
-
-      async function loadAllModels() {
+      
+      // Reusable function to render cards into the container
+      function renderModelCards(items) {
         const container = document.getElementById("models-container");
-        container.innerHTML = "Loading models...";
+        container.innerHTML = ""; // Clear old buttons/cards
 
-        try {
-          const res = await fetch(`${API_BASE}/api/artifacts`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify([
-              {
-                name: "*",
-                types: ["model"]
-              }
-            ])
-          });
-
-          if (!res.ok) {
-            container.textContent = `Failed to load models (${res.status})`;
-            return;
-          }
-
-          const items = await res.json(); 
-          // models.py returns List[ArtifactMetadata] -> [{ name, id, type }, ...]
-          container.innerHTML = "";
-
-          if (!items || items.length === 0) {
-            container.innerHTML = "<em>No models found in registry.</em>";
-            return;
-          }
-
-          items.forEach((m) => {
-            const div = document.createElement("div");
-            div.className = "model-card";
-            const name = m.name || "(no name)";
-            const id = m.id || "(no id)";
-            const type = m.type || "model";
-            div.innerHTML = `
-              <strong>${escapeHtml(name)}</strong><br/>
-              <small>ID: ${escapeHtml(id)} • Type: ${escapeHtml(type)}</small><br/>
-              <button class="lineage-btn" data-id="${escapeHtml(id)}">View Lineage</button>
-            `;
-            container.appendChild(div);
-          });
-
-          attachLineageHandlers();
-        } catch (err) {
-          container.textContent = "Error: " + err.message;
+        if (!items || items.length === 0) {
+          container.innerHTML = "<em>No models found.</em>";
+          return;
         }
+
+        items.forEach((m) => {
+          const div = document.createElement("div");
+          div.className = "model-card";
+          const name = m.name || "(no name)";
+          const id = m.id || "(no id)";
+          const type = m.type || "model";
+          
+          div.innerHTML = `
+            <strong>${escapeHtml(name)}</strong><br/>
+            <small>ID: ${escapeHtml(id)} • Type: ${escapeHtml(type)}</small><br/>
+            <button class="lineage-btn" data-id="${escapeHtml(id)}">View Lineage</button>
+          `;
+          container.appendChild(div);
+        });
+
+        // CRITICAL: Re-attach handlers to the NEW buttons we just created
+        attachLineageHandlers();
       }
 
-      document.getElementById("list-models-btn").addEventListener("click", async () => {
-        const display = document.getElementById("model-list-display");
-        display.textContent = "Loading...";
-
+      /* ----------------------------
+         Load All (Default List)
+         ---------------------------- */
+      async function loadAllModels() {
+        const statusEl = document.getElementById("search-status");
+        statusEl.textContent = "Loading all models...";
+        
         try {
           const res = await fetch(`${API_BASE}/api/artifacts`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify([
-              {
-                name: "*",
-                types: ["model"]
-              }
+              { name: "*", types: ["model"] }
             ])
           });
 
           if (!res.ok) {
-            display.textContent = `Error listing artifacts (${res.status})`;
+            statusEl.textContent = `Failed to load models (${res.status})`;
             return;
           }
 
           const items = await res.json();
-          let output = "Registered Model Artifacts:\n\n";
-
-          (items || []).forEach((m, i) => {
-            output += `${i + 1}. ${m.name}  (id=${m.id})\n`;
-          });
-
-          display.textContent = output;
+          statusEl.textContent = `Showing all ${items.length} models.`;
+          renderModelCards(items);
+          
         } catch (err) {
-          display.textContent = "Error: " + err.message;
+          statusEl.textContent = "Error: " + err.message;
         }
-      });
+      }
 
-      // Regex search
+      document.getElementById("list-models-btn").addEventListener("click", loadAllModels);
+
+      /* ----------------------------
+         Regex Search (Replaces List)
+         ---------------------------- */
       document.getElementById("search-btn").onclick = async function () {
         const inputEl = document.getElementById("search-input");
-        const display = document.getElementById("model-list-display");
+        const statusEl = document.getElementById("search-status");
         const regex = (inputEl.value || "").trim();
 
-        display.innerHTML = "";
-
         if (!regex) {
-          display.textContent = "Please enter a regex.";
+          statusEl.textContent = "Please enter a regex.";
           return;
         }
 
-        display.textContent = "Searching...";
+        statusEl.textContent = "Searching...";
 
         try {
           const res = await fetch(`${API_BASE}/api/artifact/byRegEx`, {
@@ -414,27 +386,33 @@
           });
 
           if (!res.ok) {
-            display.textContent = `Error ${res.status}`;
+            statusEl.textContent = `Error ${res.status}`;
+            // Clear container if search failed
+            document.getElementById("models-container").innerHTML = "";
             return;
           }
 
           const items = await res.json();
+          
           if (!items.length) {
-            display.textContent = `No artifacts matched regex "${regex}".`;
+            statusEl.textContent = `No artifacts matched regex "${regex}".`;
+            document.getElementById("models-container").innerHTML = "";
             return;
           }
 
-          let out = `Search results for /${regex}/:\n\n`;
-          items.forEach((m, i) => {
-            out += `${i + 1}. ${m.name}  (id=${m.id}, type=${m.type})\n`;
-          });
+          statusEl.textContent = `Found ${items.length} match(es) for /${regex}/`;
+          
+          // RENDER THE CARDS (This replaces the old buttons with the search results)
+          renderModelCards(items);
 
-          display.textContent = out;
         } catch (err) {
-          display.textContent = "Unexpected error: " + err.message;
+          statusEl.textContent = "Unexpected error: " + err.message;
         }
       };
 
+      /* ----------------------------
+         Lineage Logic
+         ---------------------------- */
       function attachLineageHandlers() {
         document.querySelectorAll(".lineage-btn").forEach((btn) => {
           btn.onclick = () => loadLineage(btn.dataset.id);
@@ -444,6 +422,9 @@
       async function loadLineage(artifactId) {
         const box = document.getElementById("lineage-view");
         box.textContent = "Loading lineage...";
+        
+        // Scroll to lineage view for better UX
+        box.scrollIntoView({ behavior: 'smooth' });
 
         try {
           const res = await fetch(
@@ -468,7 +449,6 @@
         let nodesById = {};
         let children = {};
 
-        // New Backend Structure: nodes=[{artifact_id, ...}], edges=[{from_node_artifact_id, to_node_artifact_id}]
         if (graph.nodes.length && graph.nodes[0].artifact_id) {
           graph.nodes.forEach((n) => {
             nodesById[n.artifact_id] = n;
@@ -498,7 +478,6 @@
           return walk(rootId, 0, new Set());
         } 
         
-        // Fallback for older structure just in case
         else {
           graph.nodes.forEach((n) => { nodesById[n.id] = n; });
           (graph.edges || []).forEach((e) => {
@@ -573,11 +552,9 @@
               }
             );
 
-            // Backend returns a simple BOOLEAN, not a JSON object
             const isCompatible = await response.json(); 
 
             if (!response.ok) {
-                // If it's an error, it's likely a JSON exception detail
                 output.innerHTML = `
                 <p style='color:red; font-weight:bold;'>❌ Error ${response.status}</p>
                 <p>${isCompatible.detail ?? "Unexpected server error."}</p>
