@@ -580,7 +580,7 @@ async def rate_model_artifact(id: str):
     if artifact_type not in ("model", "dataset", "code"):
         artifact_type = "model"
 
-    if artifact_type != "model":
+    if False: #artifact_type != "model":
         logger.warning(
             "rate_model_artifact: non-model artifact type=%s id=%s", artifact_type, id
         )
