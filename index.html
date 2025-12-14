@@ -511,14 +511,13 @@
           }
           alert("Registry reset.");
           document.getElementById("models-container").innerHTML = "";
-          loadAllModels();
         } catch (err) {
           alert("Error: " + err.message);
         }
       });
-
-      // Initial load
-      loadAllModels();
+      
+      // DELETED: loadAllModels() call at bottom.
+      // List is now hidden by default.
     </script>
 
     <script>
