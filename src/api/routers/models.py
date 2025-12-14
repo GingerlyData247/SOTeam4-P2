@@ -112,15 +112,15 @@ class ArtifactRegex(BaseModel):
     regex: str
 
 
-class SimpleCheckRequest(BaseModel):
+class SimpleLicenseCheckRequest(BaseModel):
     github_url: str
 
 
-class CheckInternalRequest(BaseModel):
+class LicenseCheckInternalRequest(BaseModel):
     github_url: str
 
 
-_COMPATIBILITY: Dict[str, set] = {
+LICENSE_COMPATIBILITY: Dict[str, set] = {
     "apache-2.0": {"mit", "bsd-3-clause", "bsd-2-clause", "apache-2.0"},
     "mit": {"mit", "bsd-3-clause", "bsd-2-clause"},
     "bsd-3-clause": {"bsd-3-clause", "mit"},
@@ -187,9 +187,9 @@ def _build_rating_from_metadata(artifact: dict) -> ModelRating:
         "performance_claims": _as_float(meta.get("performance_claims", 0.0)),
         "performance_claims_latency": _as_float(meta.get("performance_claims_latency", 0.0)),
 
-        #  metric is numeric in Phase 2
-        "": _as_float(meta.get("", 0.0)),
-        "_latency": _as_float(meta.get("_latency", 0.0)),
+        # license metric is numeric in Phase 2
+        "license": _as_float(meta.get("license", 0.0)),
+        "license_latency": _as_float(meta.get("license_latency", 0.0)),
 
         "dataset_and_code_score": _as_float(meta.get("dataset_and_code_score", 0.0)),
         "dataset_and_code_score_latency": _as_float(meta.get("dataset_and_code_score_latency", 0.0)),
@@ -241,63 +241,43 @@ def _extract_repo_info(url: str) -> Tuple[str, str]:
     return parts[0], parts[1]
 
 
-def _fetch_github_(owner: str, repo: str) -> str:
-    api_url = f"https://api.github.com/repos/{owner}/{repo}/"
-    logger.info("Fetching GitHub : owner=%s repo=%s", owner, repo)
+def _fetch_github_license(owner: str, repo: str) -> str:
+    api_url = f"https://api.github.com/repos/{owner}/{repo}/license"
+    logger.info("Fetching GitHub license: owner=%s repo=%s", owner, repo)
     resp = requests.get(api_url, headers={"Accept": "application/vnd.github+json"})
     if resp.status_code == 200:
         data = resp.json()
-        spdx = (data.get("", {}) or {}).get("spdx_id", "").lower()
-        logger.info("GitHub  fetched: owner=%s repo=%s spdx=%s", owner, repo, spdx)
+        spdx = (data.get("license", {}) or {}).get("spdx_id", "").lower()
+        logger.info("GitHub license fetched: owner=%s repo=%s spdx=%s", owner, repo, spdx)
         return spdx
     logger.warning(
-        "Failed to fetch GitHub : owner=%s repo=%s status=%s",
+        "Failed to fetch GitHub license: owner=%s repo=%s status=%s",
         owner,
         repo,
         resp.status_code,
     )
-    raise ValueError("Unable to determine GitHub project .")
+    raise ValueError("Unable to determine GitHub project license.")
 
 
-def _fetch_hf_(hf_id: str) -> str:
+def _fetch_hf_license(hf_id: str) -> str:
     api_url = f"https://huggingface.co/api/models/{hf_id}"
-    logger.info("Fetching HF  for hf_id=%s", hf_id)
+    logger.info("Fetching HF license for hf_id=%s", hf_id)
     resp = requests.get(api_url, timeout=10)
     if resp.status_code != 200:
         logger.warning(
-            "Failed to fetch HF : hf_id=%s status=%s",
+            "Failed to fetch HF license: hf_id=%s status=%s",
             hf_id,
             resp.status_code,
         )
         raise ValueError("Unable to fetch Hugging Face model metadata.")
     data = resp.json()
-    lic = (data.get("") or "").lower()
-    logger.info("HF  fetched: hf_id=%s =%s", hf_id, lic)
+    lic = (data.get("license") or "").lower()
+    logger.info("HF license fetched: hf_id=%s license=%s", hf_id, lic)
     return lic
 
 
 def _bytes_to_mb(n: int) -> float:
     return round(float(n) / 1_000_000.0, 3)
-
-def _resolve_id_or_index(registry: RegistryService, requested: str) -> Optional[Dict[str, Any]]:
-    """
-    Resolve an artifact by:
-      1) Exact registry ID
-      2) Positional index (autograder compatibility)
-    """
-    # 1) Exact ID match
-    item = registry.get(requested)
-    if item:
-        return item
-
-    # 2) Positional fallback (1-based indexing)
-    if requested.isdigit():
-        idx = int(requested) - 1
-        models = list(registry._models)
-        if 0 <= idx < len(models):
-            return models[idx]
-
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -312,13 +292,13 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
     logger.info("Normalized HF id: hf_id=%s hf_url=%s", hf_id, hf_url)
 
     # -------------------------
-    # Fetch HF 
+    # Fetch HF license
     # -------------------------
     try:
-        hf_ = _fetch_hf_(hf_id)
+        hf_license = _fetch_hf_license(hf_id)
     except Exception as e:
-        logger.warning("HF  fetch failed for hf_id=%s error=%s", hf_id, e)
-        hf_ = ""
+        logger.warning("HF license fetch failed for hf_id=%s error=%s", hf_id, e)
+        hf_license = ""
 
     # -------------------------
     # Compute metrics
@@ -365,7 +345,7 @@ def _ingest_hf_core(source_url: str) -> Dict[str, Any]:
         parents = []
 
     metrics["parents"] = parents
-    metrics[""] = hf_
+    metrics["license"] = hf_license
 
     # -------------------------
     # Registry create
@@ -545,53 +525,62 @@ def artifact_by_regex(body: ArtifactRegex):
 @router.get("/artifact/byName/{name:path}", response_model=List[ArtifactMetadata])
 def artifact_by_name(name: str):
     """
-    Return all artifacts whose stored name matches the provided name.
-    Behavior:
-      • Case-insensitive, trimmed comparison
-      • Returns 200 with [] if none found
-      • Matches across all artifact types
-    """
-    def normalize(s: str) -> str:
-        return (s or "").strip().lower()
+    Return all artifacts whose stored name EXACTLY equals the provided name
+    (after simple strip()).
 
-    target = normalize(name)
-    logger.warning(
-        "AUTOGRADER_LOOKUP_BY_NAME | requested=%s | registry_names=%s | registry_urls=%s",
-        target,
-        [m["name"] for m in _registry._models],
-        [m.get("source_uri") for m in _registry._models],
+    Spec / autograder behavior:
+    - Always returns 200 with a list (possibly empty).
+    - Does NOT raise 404 when no artifacts match; instead returns [].
+    """
+    raw_name = name
+    normalized = (name or "").strip()
+    logger.info(
+        "GET /artifact/byName: raw_name=%s normalized_name=%s",
+        raw_name,
+        normalized,
     )
 
+    # Work on a stable snapshot
     all_items = list(_registry._models)
-    matches: List[Dict[str, Any]] = []
 
-    for art in all_items:
-        a_name = normalize(art.get("name"))
-        if a_name == target or a_name.endswith("/" + target):
-            matches.append(art)
+    matches: List[Dict[str, Any]] = [
+        m for m in all_items if (m.get("name", "") or "").strip() == normalized
+    ]
 
-    logger.info("artifact_by_name: %d matches for '%s'", len(matches), target)
+    logger.info(
+        "artifact_by_name: total_items=%d match_count=%d match_ids=%s",
+        len(all_items),
+        len(matches),
+        [m.get("id") for m in matches],
+    )
+
+    # Spec-aligned: 200 with [] is okay when there are no matches.
+    if not matches:
+        logger.info("artifact_by_name: no matches for name=%s", normalized)
+        return []
 
     def infer_type(entry: Dict[str, Any]) -> ArtifactTypeLiteral:
         meta = entry.get("metadata") or {}
         t = str(meta.get("type") or "").lower()
         return t if t in ("model", "dataset", "code") else "model"
 
-    # deterministic ordering by id
+    # Keep deterministic ordering by id
     try:
-        matches = sorted(matches, key=lambda m: int(str(m["id"])))
+        matches_sorted = sorted(matches, key=lambda x: int(str(x["id"])))
     except Exception:
-        matches = sorted(matches, key=lambda m: str(m["id"]))
+        matches_sorted = sorted(matches, key=lambda x: str(x["id"]))
 
-    return [
-        ArtifactMetadata(
-            id=m["id"],
-            name=m["name"],
-            type=infer_type(m),
-        )
-        for m in matches
+    response = [
+        ArtifactMetadata(name=m["name"], id=m["id"], type=infer_type(m))
+        for m in matches_sorted
     ]
 
+    logger.info(
+        "artifact_by_name: response_count=%d response_ids=%s",
+        len(response),
+        [r.id for r in response],
+    )
+    return response
 
 # -----------------------
 # model static routes
@@ -605,11 +594,10 @@ async def rate_model_artifact(id: str):
     logger.info("GET /artifact/model/%s/rate", id)
 
     # 1. Look up artifact in the registry
-    artifact = _resolve_id_or_index(_registry, id)
+    artifact = _registry.get(id)
     if not artifact:
         logger.warning("rate_model_artifact: artifact not found: id=%s", id)
         raise HTTPException(status_code=404, detail="Artifact not found")
-
 
     meta = artifact.get("metadata") or {}
 
@@ -633,7 +621,7 @@ async def rate_model_artifact(id: str):
         "ramp_up_time",
         "bus_factor",
         "performance_claims",
-        "",
+        "license",
         "dataset_and_code_score",
         "dataset_quality",
         "code_quality",
@@ -694,11 +682,11 @@ def artifact_lineage(id: str):
     id = validate_artifact_id(id)
     
     logger.info("GET /artifact/model/%s/lineage", id)
-    item = _resolve_id_or_index(_registry, id)
-    if not item:
+    try:
+        g = _registry.get_lineage_graph(id)
+    except KeyError:
+        logger.warning("artifact_lineage: artifact not found: id=%s", id)
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
-
-    g = _registry.get_lineage_graph(item["id"])
 
     nodes_out = [
         {
@@ -728,11 +716,12 @@ def artifact_lineage(id: str):
     return {"nodes": nodes_out, "edges": edges_out}
 
 
-@router.post("/artifact/model/{id}/-check")
-def artifact__check(id: str, body: SimpleCheckRequest):
+@router.post("/artifact/model/{id}/license-check")
+def artifact_license_check(id: str, body: SimpleLicenseCheckRequest):
     id = validate_artifact_id(id)
+    
     logger.info(
-        "POST /artifact/model/%s/-check github_url=%s",
+        "POST /artifact/model/%s/license-check github_url=%s",
         id,
         body.github_url,
     )
@@ -740,48 +729,48 @@ def artifact__check(id: str, body: SimpleCheckRequest):
     
     item = _registry.get(id)
     if not item:
-        logger.warning("artifact__check: artifact not found: id=%s", id)
+        logger.warning("artifact_license_check: artifact not found: id=%s", id)
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
     hf_id = item["name"]
     meta = item.get("metadata") or {}
-    model_ = str(meta.get("") or "").lower()
+    model_license = str(meta.get("license") or "").lower()
 
-    if not model_:
+    if not model_license:
         try:
-            model_ = _fetch_hf_(hf_id)
+            model_license = _fetch_hf_license(hf_id)
         except Exception as e:
             logger.warning(
-                "artifact__check: unable to fetch model : hf_id=%s error=%s",
+                "artifact_license_check: unable to fetch model license: hf_id=%s error=%s",
                 hf_id,
                 e,
             )
-            raise HTTPException(status_code=502, detail="Unable to fetch model .")
+            raise HTTPException(status_code=502, detail="Unable to fetch model license.")
 
     try:
         owner, repo = _extract_repo_info(body.github_url)
-        github_ = _fetch_github_(owner, repo)
+        github_license = _fetch_github_license(owner, repo)
     except ValueError as e:
         logger.warning(
-            "artifact__check: invalid GitHub URL: github_url=%s error=%s",
+            "artifact_license_check: invalid GitHub URL: github_url=%s error=%s",
             body.github_url,
             e,
         )
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.warning(
-            "artifact__check: unable to fetch GitHub : github_url=%s error=%s",
+            "artifact_license_check: unable to fetch GitHub license: github_url=%s error=%s",
             body.github_url,
             e,
         )
-        raise HTTPException(status_code=502, detail="Unable to fetch GitHub .")
+        raise HTTPException(status_code=502, detail="Unable to fetch GitHub license.")
 
-    compatible = github_ in _COMPATIBILITY.get(model_, set())
+    compatible = github_license in LICENSE_COMPATIBILITY.get(model_license, set())
     logger.info(
-        "artifact__check: id=%s model_=%s github_=%s compatible=%s",
+        "artifact_license_check: id=%s model_license=%s github_license=%s compatible=%s",
         id,
-        model_,
-        github_,
+        model_license,
+        github_license,
         compatible,
     )
     return compatible
@@ -812,13 +801,10 @@ def artifact_cost(
         )
 
     # 3) Fetch artifact from registry
-    item = _resolve_id_or_index(_registry, id)
+    item = _registry.get(id)
     if not item:
         logger.warning("artifact_cost: artifact not found: id=%s", id)
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
-
-    id = item["id"]  # normalize downstream logic
-
 
     # Helper: read cost fields from *this artifact's* metadata
     def cost_field(meta: Dict[str, Any], name: str, alt: Optional[str] = None) -> float:
@@ -1057,68 +1043,95 @@ def artifact_create(
 @router.get(
     "/artifacts/{artifact_type}/{id}",
     response_model=Artifact,
-    summary="Return this artifact.",
-    description="Return the artifact with this ID, ignoring artifact_type mismatch per spec.",
+    summary="Interact with the artifact with this id. (BASELINE)",
+    description="Return this artifact.",
     operation_id="ArtifactRetrieve",
 )
 def artifact_get(
-    artifact_type: ArtifactTypeLiteral = Path(..., description="Type of artifact"),
-    id: str = Path(..., description="Artifact ID"),
+    artifact_type: ArtifactTypeLiteral = Path(
+        ..., description="Type of artifact to fetch"
+    ),
+    id: str = Path(
+        ..., description="ID of artifact to fetch"
+    ),
 ):
     
     id = validate_artifact_id(id)
     
     """
     Fetch a single artifact by type and ID.
+
     Spec alignment:
-      • Accept alphanumeric / hyphen IDs (not numeric-only)
-      • 404 when ID is syntactically valid but not found
-      • artifact_type is informational only
+    - artifact_type must be one of: model, dataset, code (case-insensitive).
+    - id follows the ArtifactID schema (alphanumeric/hyphen); we do NOT
+      enforce "numeric only" anymore, to match the spec and autograder.
     """
+    # Normalize artifact_type
     atype = str(artifact_type).lower()
     if atype not in ("model", "dataset", "code"):
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid artifact_type '{artifact_type}', must be one of: model, dataset, code.",
+            detail=(
+                f"Invalid artifact_type '{artifact_type}', must be one of: "
+                "model, dataset, code."
+            ),
         )
 
+    # Normalize ID; allow any non-empty string (spec allows [A-Za-z0-9-]+)
     artifact_id = str(id).strip()
     if not artifact_id:
-        raise HTTPException(status_code=400, detail="Artifact ID must be non-empty.")
+        raise HTTPException(
+            status_code=400,
+            detail="Artifact ID must be a non-empty string.",
+        )
 
-    logger.warning(
-        "AUTOGRADER_LOOKUP_BY_ID | requested=%s | registry_ids=%s | registry_names=%s | registry_urls=%s",
-        artifact_id,
-        [m["id"] for m in _registry._models],
-        [m["name"] for m in _registry._models],
-        [m.get("source_uri") for m in _registry._models],
-    )
+    logger.info("GET /artifacts/%s/%s", atype, artifact_id)
 
-    item = _resolve_id_or_index(_registry, artifact_id)
+    # Delegate existence to the registry
+    item = _registry.get(artifact_id)
     if not item:
-        logger.warning("artifact_get: not found id=%s", artifact_id)
+        logger.warning(
+            "artifact_get: not found: artifact_type=%s id=%s",
+            atype,
+            artifact_id,
+        )
+        # Spec/Autograder: syntactically valid but unknown ID → 404
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
-
+    # Infer stored type from metadata (fall back to requested type)
     meta = item.get("metadata") or {}
-    stored_type = str(meta.get("type") or atype).lower()
-    name = item.get("name")
+    stored_type = str(meta.get("type") or "").lower()
+    if stored_type not in ("model", "dataset", "code"):
+        stored_type = atype
+
+    # Derive source URL / download URL consistent with your existing logic
     source_uri = item.get("source_uri") or meta.get("source_uri")
-    url = source_uri or name
+
+    if stored_type == "model":
+        # Hugging Face models are usually identified by name
+        url = source_uri or f"https://huggingface.co/{item['name']}"
+    else:
+        # For datasets/code, just use source_uri or name as the URL
+        url = source_uri or item["name"]
+
     download_url = meta.get("download_url")
+
+    logger.info(
+        "artifact_get: id=%s stored_type=%s url=%s has_download_url=%s",
+        artifact_id,
+        stored_type,
+        url,
+        download_url is not None,
+    )
 
     return Artifact(
         metadata=ArtifactMetadata(
+            name=item["name"],
             id=item["id"],
-            name=name,
-            type=stored_type,
+            type=stored_type,  # type: ignore[arg-type]
         ),
-        data=ArtifactData(
-            url=url,
-            download_url=download_url if download_url is not None else None,
-        ),
+        data=ArtifactData(url=url, download_url=download_url),
     )
-
 
 
 
@@ -1182,11 +1195,14 @@ def artifact_delete(artifact_type: str, id: str):
     id = validate_artifact_id(id)
     
     logger.info("DELETE /artifacts/%s/%s", artifact_type, id)
-    item = _resolve_id_or_index(_registry, id)
-    if not item:
+    ok = _registry.delete(id)
+    if not ok:
+        logger.warning(
+            "artifact_delete: artifact not found: artifact_type=%s id=%s",
+            artifact_type,
+            id,
+        )
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
-
-    ok = _registry.delete(item["id"])
     logger.info("artifact_delete: deleted artifact_type=%s id=%s", artifact_type, id)
     return {"status": "deleted", "id": id}
 
