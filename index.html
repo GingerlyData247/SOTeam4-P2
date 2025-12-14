@@ -124,7 +124,6 @@
       <button id="search-btn">Search</button>
       <button id="list-models-btn">List All Models</button>
 
-      <!-- License Checker -->
       <h3>License Check</h3>
 
       <label for="license-model-input">Model Artifact ID:</label>
@@ -165,7 +164,7 @@
     <footer>© 2025 Team 4 • Purdue ECE/SWE 45000 • Phase 2</footer>
 
     <script>
-      // IMPORTANT: no /api prefix; backend exposes routes at "/..."
+      // IMPORTANT: Adjust if your API is hosted elsewhere.
       const API_BASE = "https://c1r52eygxi.execute-api.us-east-2.amazonaws.com";
 
       function escapeHtml(s) {
@@ -183,11 +182,7 @@
         if (v.startsWith("http://") || v.startsWith("https://")) {
           return v;
         }
-        // Assume plain HF id like "google-bert/bert-base-uncased" or "bert-base-uncased"
-        if (v.includes("/")) {
-          return `https://huggingface.co/${v}`;
-        }
-        // bare model name -> leave as-is under main org (autograder focuses on specific ids anyway)
+        // Assume plain HF id like "google-bert/bert-base-uncased"
         return `https://huggingface.co/${v}`;
       }
 
@@ -211,13 +206,13 @@
         out.textContent = "Registering artifact and computing metrics...";
 
         try {
-          // 1) Register artifact via POST /artifact/model
+          // 1) Register artifact via POST /api/artifact/model
           const createRes = await fetch(`${API_BASE}/api/artifact/model`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
-              // "X-Authorization": tokenIfYouEverUseAuth
             },
+            // Backend expects ArtifactData: { url: ..., name?: ... }
             body: JSON.stringify({ url: hfUrl })
           });
 
@@ -234,14 +229,17 @@
           }
 
           const artifact = await createRes.json();
-          const artifactId = artifact?.id;
+          // UPDATE: Backend returns Artifact model: { metadata: { id, name, type }, data: { ... } }
+          // We must check artifact.metadata.id
+          const artifactId = artifact?.metadata?.id || artifact?.id;
 
           if (!artifactId) {
             out.textContent = "Artifact created but no id returned.";
+            console.error("Full artifact response:", artifact);
             return;
           }
 
-          // 2) Compute rating via GET /artifact/model/{id}/rate
+          // 2) Compute rating via GET /api/artifact/model/{id}/rate
           let rating = null;
           try {
             const rateRes = await fetch(
@@ -254,12 +252,14 @@
             console.error("Rating error:", e);
           }
 
-          // 3) Try to obtain download_url from artifact or from GET /artifact/model/{id}
+          // 3) Extract download URL. 
+          // New structure prioritizes: artifact.data.download_url
           let downloadUrl =
             artifact?.data?.download_url ||
             artifact?.metadata?.download_url ||
             null;
 
+          // Fallback fetch if missing
           if (!downloadUrl) {
             try {
               const getRes = await fetch(
@@ -298,7 +298,7 @@
         }
       }
 
-      // "Get Score" just reuses analyze pipeline (register + rate)
+      // "Get Score" just reuses analyze pipeline
       async function rateUrl() {
         return analyzeUrl();
       }
@@ -312,7 +312,6 @@
         container.innerHTML = "Loading models...";
 
         try {
-          // POST /artifacts with [{ name: "*", types: ["model"] }]
           const res = await fetch(`${API_BASE}/api/artifacts`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -329,10 +328,16 @@
             return;
           }
 
-          const items = await res.json(); // spec: array of ArtifactMetadata
+          const items = await res.json(); 
+          // models.py returns List[ArtifactMetadata] -> [{ name, id, type }, ...]
           container.innerHTML = "";
 
-          (items || []).forEach((m) => {
+          if (!items || items.length === 0) {
+            container.innerHTML = "<em>No models found in registry.</em>";
+            return;
+          }
+
+          items.forEach((m) => {
             const div = document.createElement("div");
             div.className = "model-card";
             const name = m.name || "(no name)";
@@ -341,9 +346,7 @@
             div.innerHTML = `
               <strong>${escapeHtml(name)}</strong><br/>
               <small>ID: ${escapeHtml(id)} • Type: ${escapeHtml(type)}</small><br/>
-              <button class="lineage-btn" data-id="${escapeHtml(
-                id
-              )}">View Lineage</button>
+              <button class="lineage-btn" data-id="${escapeHtml(id)}">View Lineage</button>
             `;
             container.appendChild(div);
           });
@@ -388,7 +391,7 @@
         }
       });
 
-      // Regex search -> POST /artifact/byRegEx
+      // Regex search
       document.getElementById("search-btn").onclick = async function () {
         const inputEl = document.getElementById("search-input");
         const display = document.getElementById("model-list-display");
@@ -415,7 +418,7 @@
             return;
           }
 
-          const items = await res.json(); // array of ArtifactMetadata
+          const items = await res.json();
           if (!items.length) {
             display.textContent = `No artifacts matched regex "${regex}".`;
             return;
@@ -443,7 +446,6 @@
         box.textContent = "Loading lineage...";
 
         try {
-          // Spec endpoint: GET /artifact/model/{id}/lineage
           const res = await fetch(
             `${API_BASE}/api/artifact/model/${encodeURIComponent(artifactId)}/lineage`
           );
@@ -459,16 +461,15 @@
       }
 
       function renderLineageTree(graph) {
-        // Support both new spec shape and older internal shape
-        if (!graph || !graph.nodes) {
+        if (!graph || !graph.nodes || graph.nodes.length === 0) {
           return "<em>No lineage data.</em>";
         }
 
         let nodesById = {};
         let children = {};
 
+        // New Backend Structure: nodes=[{artifact_id, ...}], edges=[{from_node_artifact_id, to_node_artifact_id}]
         if (graph.nodes.length && graph.nodes[0].artifact_id) {
-          // Spec shape: nodes[].artifact_id, edges[].from_node_artifact_id, to_node_artifact_id
           graph.nodes.forEach((n) => {
             nodesById[n.artifact_id] = n;
           });
@@ -479,7 +480,6 @@
             (children[p] = children[p] || []).push(c);
           });
 
-          // Choose a root heuristically (first node)
           const rootId = graph.nodes[0].artifact_id;
 
           function walk(id, depth, seen) {
@@ -487,7 +487,7 @@
             seen.add(id);
             const label =
               nodesById[id].name || nodesById[id].artifact_id || "(unknown)";
-            let html = `<div style="margin-left:${depth * 16}px">• ${escapeHtml(
+            let html = `<div style="margin-left:${depth * 20}px">↳ ${escapeHtml(
               label
             )}</div>`;
             (children[id] || []).forEach((childId) => {
@@ -495,13 +495,12 @@
             });
             return html;
           }
-
           return walk(rootId, 0, new Set());
-        } else {
-          // Old internal format fallback: { root_id, nodes:[{id,name}], edges:[{parent,child}] }
-          graph.nodes.forEach((n) => {
-            nodesById[n.id] = n;
-          });
+        } 
+        
+        // Fallback for older structure just in case
+        else {
+          graph.nodes.forEach((n) => { nodesById[n.id] = n; });
           (graph.edges || []).forEach((e) => {
             (children[e.parent] = children[e.parent] || []).push(e.child);
           });
@@ -510,7 +509,7 @@
           function walk(id, depth, seen) {
             if (!nodesById[id] || seen.has(id)) return "";
             seen.add(id);
-            let html = `<div style="margin-left:${depth * 16}px">• ${escapeHtml(
+            let html = `<div style="margin-left:${depth * 20}px">↳ ${escapeHtml(
               nodesById[id].name
             )}</div>`;
             (children[id] || []).forEach((childId) => {
@@ -518,7 +517,6 @@
             });
             return html;
           }
-
           return walk(rootId, 0, new Set());
         }
       }
@@ -540,21 +538,19 @@
         }
       });
 
-      // Initial load of model list
+      // Initial load
       loadAllModels();
     </script>
 
     <script>
-      // License Check Button Handler -> POST /artifact/model/{id}/license-check
+      /* --------------------------------------
+         LICENSE CHECK
+         -------------------------------------- */
       document
         .getElementById("license-check-btn")
         .addEventListener("click", async () => {
-          const modelId = document
-            .getElementById("license-model-input")
-            .value.trim();
-          const repoUrl = document
-            .getElementById("license-github-input")
-            .value.trim();
+          const modelId = document.getElementById("license-model-input").value.trim();
+          const repoUrl = document.getElementById("license-github-input").value.trim();
           const output = document.getElementById("license-check-result");
 
           output.innerHTML = "";
@@ -569,9 +565,7 @@
 
           try {
             const response = await fetch(
-              `${API_BASE}/api/artifact/model/${encodeURIComponent(
-                modelId
-              )}/license-check`,
+              `${API_BASE}/api/artifact/model/${encodeURIComponent(modelId)}/license-check`,
               {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -579,30 +573,25 @@
               }
             );
 
-            let data;
-            try {
-              data = await response.json();
-            } catch {
-              data = {};
-            }
+            // Backend returns a simple BOOLEAN, not a JSON object
+            const isCompatible = await response.json(); 
 
             if (!response.ok) {
-              output.innerHTML = `
+                // If it's an error, it's likely a JSON exception detail
+                output.innerHTML = `
                 <p style='color:red; font-weight:bold;'>❌ Error ${response.status}</p>
-                <p>${data.detail ?? "Unexpected server error."}</p>
+                <p>${isCompatible.detail ?? "Unexpected server error."}</p>
               `;
               return;
             }
 
             output.innerHTML = `
-              <strong>Model Artifact ID:</strong> ${data.model_id}<br>
-              <strong>Model Name:</strong> ${data.model_name}<br>
-              <strong>Model License:</strong> ${data.model_license}<br>
-              <strong>GitHub License:</strong> ${data.github_license}<br>
+              <strong>GitHub URL:</strong> ${escapeHtml(repoUrl)}<br>
+              <strong>Model ID:</strong> ${escapeHtml(modelId)}<br>
+              <br>
               <strong>Compatible:</strong> ${
-                data.compatible ? "✅ Yes" : "❌ No"
-              }<br><br>
-              <strong>Reason:</strong> ${data.reason}
+                isCompatible === true ? "✅ Yes" : "❌ No"
+              }
             `;
           } catch (err) {
             output.innerHTML = `
@@ -614,8 +603,3 @@
     </script>
   </body>
 </html>
-
-
-
-
-
