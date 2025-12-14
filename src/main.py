@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response, Request
 # from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from mangum import Mangum
@@ -44,7 +44,7 @@ app.include_router(models_router, prefix="/api")
 app.include_router(s3_router)
 
 @app.options("/{path:path}")
-async def preflight(path: str):
+async def preflight(path: str, request: Request):
     return Response(status_code=204)
 
 # -------------------------------------------------------------
