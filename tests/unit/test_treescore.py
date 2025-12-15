@@ -1,4 +1,22 @@
 # tests/unit/test_treescore.py
+#
+# SWE 45000 – Phase 2
+#
+# Unit tests for the tree-based lineage scoring (treescore) metric.
+#
+# This file validates how a model’s score is influenced by its parent models
+# in the dependency lineage graph. The treescore metric combines a model’s
+# own net score with the average net scores of its ancestors.
+#
+# The tests ensure:
+# - Models with no parents fall back to their own net score
+# - Parent models correctly contribute to the final score
+# - Recursive parent traversal is cycle-safe and terminates correctly
+# - Scores are clamped to valid numeric ranges and latency is recorded
+#
+# All external dependencies are mocked to ensure deterministic behavior,
+# prevent infinite recursion, and guarantee rubric-compliant unit coverage.
+# tests/unit/test_treescore.py
 import pytest
 from unittest.mock import patch
 
