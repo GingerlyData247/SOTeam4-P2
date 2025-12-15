@@ -1,3 +1,19 @@
+# ---------------------------------------------------------------------------
+# Unit Tests: Performance Claims Metric
+#
+# This test suite verifies the correctness and robustness of the
+# `performance_claims` metric, which estimates model credibility based on
+# Hugging Face download statistics.
+#
+# The tests validate:
+#   - Correct tier-based score assignment across all download thresholds
+#   - Proper handling of Hugging Face API errors (HfHubHTTPError)
+#   - Graceful failure behavior for generic exceptions and missing metadata
+#   - Deterministic latency reporting under all conditions
+#
+# All external API calls are fully mocked to ensure deterministic,
+# offline-safe execution and compliance with the Phase 2 grading rubric.
+# ---------------------------------------------------------------------------
 # tests/unit/test_performance_claims.py
 
 from src.metrics.performance_claims import metric
