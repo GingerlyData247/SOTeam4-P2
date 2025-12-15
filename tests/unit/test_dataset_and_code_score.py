@@ -1,3 +1,19 @@
+# ---------------------------------------------------------------------------
+# Unit Tests: Dataset and Code Link Score Metric
+#
+# This test suite verifies the behavior of the `dataset_and_code_score` metric,
+# which evaluates whether a model artifact provides references to both its
+# training dataset(s) and associated source code repository.
+#
+# The tests cover all expected scoring outcomes:
+#   - Full score (1.0) when both dataset and GitHub code links are present
+#   - Partial score (0.5) when only one of the two links is found
+#   - Zero score (0.0) when neither dataset nor code references are available
+#
+# External dependencies such as Hugging Face metadata and GitHub link discovery
+# are mocked to ensure deterministic behavior and to validate safe degradation
+# in accordance with the Phase 2 Trustworthy Model Registry specification.
+# ---------------------------------------------------------------------------
 # tests/unit/test_dataset_and_code_score.py
 from src.metrics.dataset_and_code_score import metric
 
