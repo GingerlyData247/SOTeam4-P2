@@ -1,3 +1,24 @@
+# -------------------------------------------------------------------
+# Backend Continuous Deployment (CD) Workflow
+#
+# Automatically builds and deploys the FastAPI backend to AWS Lambda
+# whenever backend source files or dependencies change on the main
+# branch.
+#
+# Triggers:
+#   - Pushes to `main` affecting backend source code or requirements
+#   - Manual execution via workflow_dispatch
+#
+# Deployment details:
+#   - Uses GitHub Actions OIDC to securely assume an AWS IAM role
+#   - Installs Python dependencies into a Lambda-compatible build
+#     directory
+#   - Packages application code and dependencies into a ZIP archive
+#   - Updates the deployed AWS Lambda function in-place
+#
+# This workflow enables safe, repeatable backend deployments without
+# storing long-lived AWS credentials in the repository.
+# -------------------------------------------------------------------
 name: CD - Deploy API to Lambda
 
 on:
