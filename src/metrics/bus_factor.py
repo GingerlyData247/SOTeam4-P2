@@ -1,3 +1,25 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# METRIC: bus_factor
+# REQUIREMENTS SATISFIED: bus_factor metric score
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/metrics/bus_factor.py
+
+Computes the Bus Factor metric for a model artifact.
+
+This metric estimates how risky a project is in terms of maintainability
+by examining the number of contributors to the model’s associated GitHub
+repository. Projects with more contributors receive higher scores, as
+knowledge is less concentrated in a small number of individuals.
+
+The metric follows the Phase 2 specification and degrades safely when
+GitHub metadata or contributor information is unavailable.
+"""
 # src/metrics/bus_factor.py
 from __future__ import annotations
 import time, re, math, os
