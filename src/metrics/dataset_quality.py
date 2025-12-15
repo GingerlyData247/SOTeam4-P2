@@ -1,3 +1,34 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# METRIC: dataset_quality
+# REQUIREMENTS SATISFIED: dataset_quality metric score
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/metrics/dataset_quality.py
+
+Computes the Dataset Quality metric for a model artifact.
+
+This metric evaluates the quality and usability of datasets associated
+with a model by identifying dataset references from multiple sources,
+including Hugging Face model tags and README content. Each discovered
+dataset is scored based on available metadata such as documentation,
+download count, and community engagement.
+
+Scoring approach:
+    - Dataset references are extracted from model tags and README links
+    - Each dataset is scored individually using Hugging Face metadata
+    - The final score is the maximum dataset score found
+    - If datasets are referenced but not scorable, a partial fallback
+      score is returned
+
+The metric follows the Phase 2 specification and is designed to be
+fault-tolerant, always returning a bounded score and measured latency
+even when metadata retrieval fails.
+"""
 from __future__ import annotations
 import time, re, logging, os
 from typing import Any, Dict, Tuple, Set
