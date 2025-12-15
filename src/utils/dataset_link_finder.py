@@ -1,8 +1,35 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# COMPONENT: DATASET LINK DISCOVERY UTILITIES
+# REQUIREMENTS SATISFIED: dataset discovery support for scoring and ingestion
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/utils/dataset_link_finder.py
+
+Provides utilities for discovering dataset references associated with a
+Hugging Face model.
+
+This module implements robust logic to identify dataset links and names
+connected to a model artifact. It prioritizes structured Hugging Face
+metadata when available and falls back to carefully constrained README
+parsing strategies to avoid false positives.
+
+Key responsibilities:
+    - Extract dataset references from Hugging Face model metadata
+    - Parse local or remote README files for dataset declarations
+    - Normalize dataset URLs and names into canonical HF dataset IDs
+    - Support YAML frontmatter, HTML links, and contextual text mentions
+    - Return deterministic, de-duplicated results with measured latency
+
+These utilities are used by dataset-related metrics and ingestion logic
+to ensure dataset associations are identified accurately and safely in
+accordance with the Phase 2 specification.
+"""
 # src/utils/dataset_link_finder.py
-"""
-Robustly finds dataset references (URLs or names) associated with a Hugging Face model,
-prioritizing official metadata and using stricter README parsing.
-"""
 from __future__ import annotations
 import re
 import os
