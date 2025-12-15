@@ -1,3 +1,21 @@
+# ---------------------------------------------------------------------------
+# Unit Tests: Bus Factor Metric
+#
+# This test suite validates the correctness and robustness of the
+# `bus_factor` metric implementation.
+#
+# Covered behavior:
+#   - Entropy-based bus factor calculation for commit histories
+#   - Correct handling of single vs. multiple contributors
+#   - Proper mapping of GitHub contributor counts to normalized scores
+#   - Safe degradation when the GitHub API fails or is unavailable
+#
+# External dependencies (GitHub API) are mocked to ensure tests are
+# deterministic, fast, and do not rely on network access.
+#
+# These tests support the Phase 2 Trustworthy Model Registry metrics
+# and help ensure consistent scoring behavior under edge cases.
+# ---------------------------------------------------------------------------
 # tests/unit/test_bus_factor.py
 import pytest
 from unittest.mock import patch, MagicMock
