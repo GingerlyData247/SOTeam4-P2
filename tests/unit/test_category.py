@@ -1,3 +1,20 @@
+# ---------------------------------------------------------------------------
+# Unit Tests: Category Metric
+#
+# This test suite verifies the behavior of the `category` metric, which
+# classifies artifacts based on their source and metadata.
+#
+# Covered behavior:
+#   - Hugging Face models using `pipeline_tag` as the category when available
+#   - Default categorization for Hugging Face models without a pipeline tag
+#   - Correct classification of GitHub repositories as code artifacts
+#
+# External API calls to Hugging Face are mocked to ensure deterministic,
+# fast, and network-independent test execution.
+#
+# These tests support the Phase 2 Trustworthy Model Registry by ensuring
+# consistent artifact categorization across model and code sources.
+# ---------------------------------------------------------------------------
 from src.metrics.category import metric
 
 # A fake class to simulate the model_info object from the real API
