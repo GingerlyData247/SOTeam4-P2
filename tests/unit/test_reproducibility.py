@@ -1,6 +1,20 @@
+# tests/unit/test_reproducibility.py
+#
 # SWE 45000 – Phase 2
-# Tests for reproducibility metric
-
+#
+# Unit tests for the reproducibility metric.
+#
+# These tests validate that the reproducibility score is computed based on
+# the presence of common artifacts that enable experiment replication,
+# including dependency files, notebooks, and documentation cues.
+#
+# The tests ensure:
+# - Empty projects yield a score of 0.0
+# - Individual reproducibility signals contribute partial credit
+# - Multiple signals combine correctly and cap at a maximum score of 1.0
+#
+# All tests operate on temporary directories to avoid filesystem side effects
+# and ensure deterministic behavior.
 import pytest
 import os
 from pathlib import Path
