@@ -1,3 +1,21 @@
+# ---------------------------------------------------------------------------
+# Unit Tests: Code Quality Metric
+#
+# This test suite validates the behavior of the `code_quality` metric and its
+# internal scoring components, including documentation quality, repository
+# structure, popularity signals, and library/framework detection.
+#
+# Covered components:
+#   - _doc_score: README presence, model card metadata, and documentation signals
+#   - _structure_score: configuration files, examples, and repository layout
+#   - _popularity: normalization of download count thresholds
+#   - _library_score: detection of ML libraries and pipeline tags
+#   - metric(): correct aggregation of sub-scores and safe fallback behavior
+#
+# These tests ensure deterministic scoring and safe degradation when Hugging
+# Face metadata is incomplete or unavailable, as required by the Phase 2
+# Trustworthy Model Registry specification.
+# ---------------------------------------------------------------------------
 # tests/unit/test_code_quality.py
 from unittest.mock import patch
 from types import SimpleNamespace
