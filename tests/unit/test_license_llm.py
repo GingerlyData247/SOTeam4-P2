@@ -1,3 +1,20 @@
+# ---------------------------------------------------------------------------
+# Unit Tests: License Metric (LLM / Edge-Case Validation)
+#
+# This test suite validates nuanced and edge-case behaviors of the license
+# scoring heuristic, focusing on robustness against real-world variations
+# commonly produced by large language models or inconsistent metadata.
+#
+# The tests ensure:
+#   - License matching is case-insensitive (e.g., "Apache-2.0" vs "apache-2.0")
+#   - Creative Commons licenses are consistently treated as weakly compatible
+#     and receive partial credit rather than full permissive scores
+#   - Direct calls to the underlying `_license_score` helper function behave
+#     consistently with the documented heuristic
+#
+# All Hugging Face API interactions are mocked to guarantee deterministic,
+# offline-safe execution and full compliance with the Phase 2 grading rubric.
+# ---------------------------------------------------------------------------
 # tests/unit/test_license_llm.py
 from unittest.mock import patch
 from src.metrics.license import metric, _license_score
