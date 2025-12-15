@@ -24,6 +24,12 @@ The registry exposes a strictly **OpenAPI-compliant REST API** and a browser-bas
 * **Delete**: Remove artifacts by ID.
 * **Reset**: Restore the registry to a clean default state.
 
+- Secure artifact download via **presigned S3 URLs**
+- Supports full artifact downloads
+- Returns correct HTTP status codes for rejected, missing, or malformed requests
+
+
+
 ### Trust & Governance Features
 
 * **Reproducibility scoring** (0, 0.5, 1.0)
@@ -40,6 +46,34 @@ The registry exposes a strictly **OpenAPI-compliant REST API** and a browser-bas
 * Package confusion attack detection
 * Performance benchmarking and bottleneck analysis
 * High-assurance testing and disaster-proofing
+
+- Persistent registry stored in **S3** (`registry/registry.json`)
+- Supports create, retrieve, delete, enumerate, and count operations
+- Metadata preserved exactly as required by the Phase 2 spec
+- Hardened against malformed registry entries to avoid runtime failures
+
+### Automated Model Rating
+- Computes all required Phase 2 metrics:
+  - Net score
+  - Ramp-up time
+  - Bus factor
+  - Performance claims
+  - License suitability
+  - Dataset & code score
+  - Dataset quality
+  - Code quality
+  - Reproducibility
+  - Reviewedness
+  - Tree score
+  - Size score (Raspberry Pi, Jetson Nano, Desktop PC, AWS Server)
+- Latency recorded per metric
+
+### Cloud-Ready Architecture
+- **FastAPI** backend
+- **Mangum** adapter for AWS Lambda
+- **S3** for artifact storage and registry persistence
+- **CloudWatch-friendly request logging** via custom ASGI middleware
+- Local filesystem fallback for development and testing
 
 ---
 
