@@ -1,3 +1,22 @@
+# -------------------------------------------------------------------
+# Frontend Continuous Deployment (CD) Workflow
+#
+# Automatically deploys the static frontend assets to the S3 hosting
+# bucket whenever changes are pushed to the main branch.
+#
+# Triggers:
+#   - Pushes to `main` affecting frontend files (HTML, JS, CSS, assets)
+#   - Manual execution via workflow_dispatch
+#
+# Deployment details:
+#   - Uses GitHub Actions OIDC to assume an AWS IAM role (no static keys)
+#   - Syncs static files to the S3 website bucket
+#   - Excludes backend, source code, tests, and configuration files
+#   - Deletes removed files in S3 to keep deployments in sync
+#
+# This workflow supports secure, automated frontend delivery and
+# separation of frontend and backend deployment concerns.
+# -------------------------------------------------------------------
 name: CD - Deploy Frontend to S3
 
 on:
