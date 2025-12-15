@@ -1,3 +1,32 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# COMPONENT: S3 STORAGE UTILITIES
+# REQUIREMENTS SATISFIED: artifact storage and retrieval support
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/aws/s3_utils.py
+
+Provides helper utilities for interacting with Amazon S3 storage.
+
+This module encapsulates common S3 operations used throughout the backend,
+including uploading and downloading raw byte data. It centralizes S3
+client creation and bucket configuration, allowing the rest of the
+application to remain agnostic to AWS environment details.
+
+Key features:
+    - Automatically resolves the S3 bucket name from environment variables
+    - Creates S3 clients compatible with both AWS Lambda and local execution
+    - Supports uploading and downloading arbitrary byte data
+    - Exposes compatibility aliases for legacy storage interfaces
+
+These utilities are used by API routes and backend services to persist
+artifact data and generated files in a reliable, cloud-backed storage
+layer.
+"""
 # src/aws/s3_utils.py
 import os
 import boto3
