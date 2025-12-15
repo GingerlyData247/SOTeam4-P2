@@ -1,3 +1,32 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# METRIC: performance_claims
+# REQUIREMENTS SATISFIED: performance_claims metric score
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/metrics/performance_claims.py
+
+Computes the Performance Claims metric for a model artifact.
+
+This metric estimates how credible and established a model’s claimed
+performance is by analyzing its visibility and adoption within the
+Hugging Face ecosystem. As a proxy for real-world validation, the metric
+primarily uses the model’s download count to infer how widely the model
+has been evaluated and trusted by the community.
+
+Scoring approach:
+    - Download counts are mapped to a tiered score between 0.0 and 1.0
+    - Models with higher adoption receive higher performance-claims scores
+    - Models that cannot be retrieved or do not exist receive a score of 0.0
+
+The metric is lightweight, Hugging Face–only, and fault-tolerant, always
+returning a bounded score and measured latency per the Phase 2
+specification.
+"""
 from __future__ import annotations
 from huggingface_hub.utils import HfHubHTTPError
 
