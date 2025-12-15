@@ -1,20 +1,36 @@
-# SWE 45000 – Phase 2 Project
-# Metric: Reproducibility
-# Author: Wisam Brahim
-# 
-# PURPOSE:
-#   Estimates how easily a user can re-run the experiments for a given model.
-#   A high score means the repo provides clear instructions, environment files,
-#   and reproducible scripts or notebooks.
-#
-# OUTPUT FORMAT:
-#   metric(resource: dict) -> tuple[float, int]
-#   Returns (score in [0,1], latency_ms)
-#
-# DATA SOURCE:
-#   Uses the cloned local repository path provided in resource["local_dir"].
-#   (Tests mock this path so the function can run offline.)
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
 
+# METRIC: reproducibility
+# REQUIREMENTS SATISFIED: reproducibility metric score
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/metrics/reproducibility.py
+
+Computes the Reproducibility metric for a model artifact.
+
+This metric evaluates how easily a model’s results can be reproduced by
+examining the availability of environment configuration files, example
+notebooks, and reproducibility instructions. When possible, the metric
+prefers inspecting a locally available repository. If local inspection
+is not possible, it falls back to lightweight metadata-based heuristics
+using remote Hugging Face information.
+
+Scoring approach:
+    - Local repository analysis (preferred):
+        • requirements files
+        • environment configuration files
+        • Jupyter notebooks
+        • README instructions mentioning reproduction
+    - Remote fallback:
+        • presence of training, dataset, or configuration metadata
+
+The metric is fault-tolerant and deterministic, always returning a
+bounded score and measured latency per the Phase 2 specification.
+"""
 # src/metrics/reproducibility.py
 from __future__ import annotations
 import os, time
