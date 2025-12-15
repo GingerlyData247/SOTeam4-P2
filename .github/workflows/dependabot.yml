@@ -1,3 +1,21 @@
+# -------------------------------------------------------------------
+# Dependabot Configuration
+#
+# Automatically checks for outdated dependencies and opens pull
+# requests to keep the project up to date.
+#
+# Configured ecosystems:
+#   - Python (pip): requirements.txt
+#   - GitHub Actions: workflow dependencies
+#
+# Update policy:
+#   - Daily checks
+#   - Up to 5 open PRs per ecosystem
+#   - Uses version increase strategy for Python packages
+#
+# This file supports long-term maintainability and security by
+# ensuring dependencies remain current.
+# -------------------------------------------------------------------
 version: 2
 updates:
   # --- Python dependencies (requirements.txt) ---
@@ -14,3 +32,4 @@ updates:
     schedule:
       interval: "daily"
     open-pull-requests-limit: 5
+
