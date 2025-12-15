@@ -1,3 +1,35 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# COMPONENT: REGISTRY SERVICE
+# REQUIREMENTS SATISFIED: artifact persistence, lookup, and lineage graph support
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/services/registry.py
+
+Defines the registry service responsible for persisting and managing
+artifact records.
+
+This module implements a lightweight registry backed by Amazon S3. It
+stores artifact metadata, assigns unique identifiers, and provides CRUD
+operations used throughout the backend. The service also supports
+construction of simple lineage graphs for model artifacts based on
+stored metadata.
+
+Key responsibilities:
+    - Persist artifact metadata to S3 using a JSON-based registry file
+    - Assign and manage unique artifact identifiers
+    - Provide create, retrieve, delete, count, and reset operations
+    - Safely recover from S3 or JSON failures without crashing the system
+    - Construct lineage graphs for model artifacts with external fallbacks
+
+The registry service acts as the authoritative source of truth for
+artifacts in the Trustworthy Model Registry and is designed to be
+fault-tolerant and compatible with Phase 2 API requirements.
+"""
 import json
 import boto3
 import logging
