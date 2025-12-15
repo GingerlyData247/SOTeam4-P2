@@ -1,9 +1,40 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# METRIC: size
+# REQUIREMENTS SATISFIED: size metric score
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/metrics/size.py
+
+Computes the Size Compatibility metric for a model artifact.
+
+This metric evaluates how suitable a model is for deployment across
+different hardware environments by analyzing the total storage size of
+the model repository. Size information is retrieved from the Hugging Face
+API and mapped to compatibility scores for several common deployment
+targets.
+
+Hardware targets evaluated:
+    - Raspberry Pi
+    - Jetson Nano
+    - Desktop PC
+    - AWS server-class instances
+
+Scoring approach:
+    - Model size is determined using Hugging Face metadata (usedStorage
+      or summed file sizes as a fallback)
+    - Size is normalized against hardware-specific capacity thresholds
+    - Smaller models receive higher compatibility scores
+
+The metric is deterministic, fault-tolerant, and always returns a
+dictionary of bounded scores along with measured latency per the Phase 2
+specification.
+"""
 # src/metrics/size.py
-"""
-Calculates a dictionary of size compatibility scores for a model using
-the 'usedStorage' attribute from the HfApi client for reliable size data.
-Includes final check on return value.
-"""
 from __future__ import annotations
 import time
 import logging
