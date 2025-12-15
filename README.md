@@ -12,7 +12,7 @@ The registry exposes a strictly **OpenAPI-compliant REST API** and a browser-bas
 * **API**: https://c1r52eygxi.execute-api.us-east-2.amazonaws.com/docs
 * **Frontend**: http://sot4-model-registry-dev.s3-website.us-east-2.amazonaws.com/
 
-## Key Capabilities
+## Summary of Key Capabilities
 
 ### Artifact Lifecycle (Baseline)
 
