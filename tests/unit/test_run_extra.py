@@ -1,3 +1,19 @@
+# tests/unit/test_run_extra.py
+#
+# SWE 45000 – Phase 2
+#
+# Additional unit tests for src/run.py covering edge cases and
+# failure-handling paths not exercised in the primary CLI tests.
+#
+# These tests validate:
+# - Error handling in subprocess execution and dependency installation
+# - Robust behavior of process_url_file with missing, empty, and non-model inputs
+# - Metric loading when some metrics raise exceptions
+# - classify_url edge cases for invalid or non-string inputs
+# - Filesystem safety utilities such as remove_readonly
+#
+# External effects (filesystem, subprocess calls, dynamic imports)
+# are mocked or sandboxed to ensure deterministic, isolated execution.
 import io
 import sys
 import run
