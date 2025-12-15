@@ -146,7 +146,7 @@ Where enabled, authentication tokens expire after a fixed time or number of API 
 
 ### Prerequisites
 
-* Python 3.11+
+* Python 3.12
 * Git
 * AWS account (free tier)
 
