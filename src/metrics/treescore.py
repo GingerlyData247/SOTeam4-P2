@@ -1,3 +1,37 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# METRIC: treescore
+# REQUIREMENTS SATISFIED: treescore metric score, model lineage analysis
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/metrics/treescore.py
+
+Computes the TreeScore metric for a model artifact.
+
+TreeScore evaluates a model in the context of its lineage by analyzing
+its parent and ancestor models. Rather than scoring a model in isolation,
+this metric considers how the model fits into a broader ecosystem of
+derived models and foundational base models.
+
+High-level approach:
+    - Compute the model’s own aggregate score across Phase 2 metrics
+    - Identify parent models using Hugging Face metadata and model cards
+    - Recursively walk the lineage tree to collect ancestor scores
+    - Combine the model’s own score with the average score of its ancestors
+
+Key characteristics:
+    - Uses cached Hugging Face metadata to reduce API calls
+    - Dynamically loads other Phase 2 metrics to compute aggregate scores
+    - Handles cycles and missing metadata safely
+    - Provides deterministic, bounded output with measured latency
+
+This metric supports Phase 2 lineage requirements and enables downstream
+API features such as model ancestry visualization and traceability.
+"""
 # src/metrics/treescore.py
 from __future__ import annotations
 import time, importlib
