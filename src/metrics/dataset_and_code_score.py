@@ -1,3 +1,31 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# METRIC: dataset_and_code_score
+# REQUIREMENTS SATISFIED: dataset_and_code_score metric score
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/metrics/dataset_and_code_score.py
+
+Computes the Dataset and Code Score metric for a model artifact.
+
+This metric evaluates whether a model provides sufficient supporting
+resources for reproducibility and reuse by detecting the presence of:
+    - Linked dataset(s)
+    - A linked source code repository (e.g., GitHub)
+
+Scoring logic:
+    - 1.0 if both dataset links and code repository links are found
+    - 0.5 if only one of the two is found
+    - 0.0 if neither are found
+
+The metric is lightweight, deterministic, and fault-tolerant, always
+returning a bounded score and measured latency per the Phase 2
+specification.
+"""
 import time
 import logging
 from typing import Any, Dict, Tuple, Optional
