@@ -1,3 +1,34 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# COMPONENT: GITHUB LINK DISCOVERY UTILITIES
+# REQUIREMENTS SATISFIED: GitHub repository discovery for scoring and ingestion
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/utils/github_link_finder.py
+
+Provides utility functions for discovering GitHub repository URLs associated
+with Hugging Face model artifacts.
+
+This module attempts to extract GitHub links from a model’s README file using
+a strictly defined priority order to ensure deterministic and testable behavior.
+It first relies on Hugging Face’s official README download mechanism and only
+falls back to lightweight HTTP-based approaches when that mechanism fails.
+
+Key responsibilities:
+    - Extract GitHub URLs from Hugging Face model READMEs
+    - Support Markdown, plain-text, and bare GitHub link formats
+    - Normalize discovered links into valid HTTPS GitHub URLs
+    - Enforce strict fallback behavior to satisfy test and autograder contracts
+    - Avoid unnecessary network calls when README content is available
+
+This utility is used by scoring and ingestion services to associate model
+artifacts with their corresponding source code repositories in a safe,
+controlled, and reproducible manner, as required by the Phase 2 specification.
+"""
 # src/utils/github_link_finder.py
 import logging
 import re
