@@ -1,114 +1,208 @@
-# Team Names:
-Wesley Cameron Todd
+# SOTeam4 – Model Registry & Scoring API (Phase 2)
 
-Esau Cortez
+ECE 461 – Software Engineering (Fall 2025)
 
-Ethan Surber
+## Team Members
+- Wesley Cameron Todd
+- Esau Cortez
+- Ethan Surber
+- Sam Brahim
 
-Sam Brahim
+---
 
-# Metrics:
+## Overview
+This project implements a **model registry and automated evaluation service** for machine learning models, designed for the ECE 461 Phase 2 final deliverable. The system allows users to ingest ML models (primarily from Hugging Face), compute a standardized set of quality metrics, store results in a registry, and retrieve ratings and artifacts via a REST API and web frontend.
 
-# Ramp_up_time: 
+The goal is to help organizations quickly assess whether a model is **usable, reliable, reproducible, and legally compatible** before adoption.
 
-Start latency timer using time.perf_counter().
+The system consists of:
+- A **FastAPI backend** deployed on AWS (Lambda + API Gateway)
+- **S3-backed storage** for registry state and model artifacts
+- A **web frontend** for interactive usage
+- A **metrics engine** that computes all required Phase 2 scores
 
-Look for a local README: if resource contains local_dir (a directory path), we check common README filenames (README.md, README.rst, README.txt, README) in that directory. If found, read it (UTF-8, errors replaced).
+---
 
-If no local README, attempt a best-effort remote fetch (only if requests is installed) for common repo hosts:
+## Deployed Endpoints
 
-For GitHub: tries raw.githubusercontent.com/{owner}/{repo}/{branch}/README.md for main and master.
+### API
+```
+https://c1r52eygxi.execute-api.us-east-2.amazonaws.com
+```
 
-For Hugging Face: tries similar raw/{branch}/README.md patterns.
+### Web UI
+```
+http://sot4-model-registry-dev.s3-website.us-east-2.amazonaws.com/
+```
 
-Generic fallbacks are also attempted.
+---
 
-Note: this remote fetch is optional and will be skipped if requests is not present. (Testing can mock requests so no network is required.)
+## Core Features
 
-If no README content is available, return score 0.0 and the elapsed latency.
+### 1. Artifact Registry
+- Persistent registry stored in **S3** (`registry/registry.json`)
+- Supports create, retrieve, delete, enumerate, and count operations
+- Metadata preserved exactly as required by the Phase 2 spec
+- Hardened against malformed registry entries to avoid runtime failures
 
-If README content is found, compute:
+### 2. Model Ingestion
+- Hugging Face model ingestion via URL
+- Normalization of HF IDs
+- Automatic metric computation during ingest
+- Lineage extraction (parent models) for tree score computation
 
-Length score from the word count using thresholds (0.0 / 0.1 / 0.25 / 0.4).
+### 3. Automated Model Rating
+- Computes all required Phase 2 metrics:
+  - Net score
+  - Ramp-up time
+  - Bus factor
+  - Performance claims
+  - License suitability
+  - Dataset & code score
+  - Dataset quality
+  - Code quality
+  - Reproducibility
+  - Reviewedness
+  - Tree score
+  - Size score (Raspberry Pi, Jetson Nano, Desktop PC, AWS Server)
+- Latency recorded per metric
+- Output strictly matches the `ModelRating` OpenAPI schema
 
-Installation score = +0.35 if README contains an "installation" heading or common install phrases (pip install, conda install, docker, etc.).
+### 4. Artifact Download
+- Secure artifact download via **presigned S3 URLs**
+- Supports full artifact downloads
+- Returns correct HTTP status codes for rejected, missing, or malformed requests
 
-Code snippet score = +0.25 if README contains fenced code blocks (```) or indented code lines (4 leading spaces or tabs).
+### 5. Cloud-Ready Architecture
+- **FastAPI** backend
+- **Mangum** adapter for AWS Lambda
+- **S3** for artifact storage and registry persistence
+- **CloudWatch-friendly request logging** via custom ASGI middleware
+- Local filesystem fallback for development and testing
 
-Sum weights (length + install + code) and cap at 1.0. Round score to 4 decimals.
+---
 
-Return (score, latency_ms) where latency_ms is integer milliseconds (rounded).
+## API Routes (Summary)
 
-# License, Purdue GENAI Studio API key must be set as an evironment variable in your cmd or ps before usage
+All API routes are prefixed with `/api` unless noted.
 
-File-reading helpers (_read_local_file)
+### Health & Admin
+- `GET /health` – Service health and uptime
+- `DELETE /reset` – Reset registry and scoring state
+- `GET /tracks` – Returns supported tracks
 
-Prefer LICENSE file in the repo (most authoritative). If not found, the code will try README files. This makes behavior deterministic in grading when prepare_resource supplies a local clone.
+### Artifact Queries
+- `POST /artifact/byRegEx` – Regex search over artifacts
+- `GET /artifact/byName/{name}` – Exact name lookup
 
-Heuristic fallback (heuristic_license_score)
+### Model Operations
+- `POST /artifact/model` – Ingest a model
+- `GET /artifact/model/{id}/rate` – Retrieve model rating
+- `GET /artifact/model/{id}/download` – Download model artifact
 
-A lightweight rule-based mapping for environments with no API key or when the LLM fails. It maps common keyword signals to scores (MIT=1.0, Apache≈0.95, GPL lower). This ensures the metric never crashes and is testable offline.
+### S3 Utility Routes
+- `POST /api/s3/put-text`
+- `GET /api/s3/get-text`
+- `POST /api/s3/upload`
 
-LLM prompt builder (_build_prompt_for_license)
+---
 
-Asks the LLM to return only a JSON object with specific fields. This makes parsing easier and keeps the output structured.
+## Architecture
 
-Purdue API call (_call_purdue_genai)
+```
+Client (Browser)
+   │
+   ▼
+Frontend (S3 Static Site)
+   │
+   ▼
+API Gateway
+   │
+   ▼
+AWS Lambda (FastAPI + Mangum)
+   │
+   ├── Metrics Engine
+   ├── Registry Service (S3)
+   ├── Storage Service (S3 / Local)
+   └── Hugging Face + GitHub APIs
+```
 
-Implements an OpenAI-compatible chat-completions POST to https://genai.rcac.purdue.edu/api/chat/completions using Authorization: Bearer <API_KEY> in the header. Example and header style are from RCAC docs. 
-RCAC
+---
 
-Parsing (_extract_json_from_assistant)
+## Environment Variables
 
-Extracts the first JSON object found inside the assistant message (handles triple-backticks and single-quote issues). Helps robustness.
+The following environment variables are required or supported:
 
-Public metric(resource)
+```bash
+# AWS
+S3_BUCKET=<bucket-name>
+AWS_REGION=us-east-2
 
-Puts it all together: reads local LICENSE/README, tries LLM (if API key present), extracts compatibility_score, or falls back to heuristic. Returns (score_in_[0,1], latency_ms)
+# Optional tokens (strongly recommended)
+HUGGINGFACE_HUB_TOKEN=<token>
+GITHUB_TOKEN=<token>
 
-# Performance Claims:
-Start latency timer using time.perf_counter().
+# Local development
+LOCAL_STORAGE=1
+```
 
-The metric makes an API call to the Hugging Face Hub using the model's repository ID (e.g., google/gemma-2b).
+---
 
-It extracts the total number of downloads from the API response.
+## Local Development
 
-The raw download count is converted into a normalized score between 0.0 and 1.0 using a tiered system (e.g., >1M downloads = 1.0, >100k downloads = 0.8, etc.).
+### Requirements
+- Python 3.12+
+- AWS credentials (for S3 mode)
 
-If the model cannot be found on the Hub or if there is a network error, the metric gracefully fails and returns a score of 0.0.
+### Install
+```bash
+pip install -r requirements.txt
+```
 
-Return (score, latency_ms)
+### Run Locally
+```bash
+uvicorn src.main:app --reload
+```
 
-# Reproducibility (New for Phase 2)
+If `LOCAL_STORAGE=1` is set, artifacts are written to `/tmp/local-artifacts` instead of S3.
 
-Measures "how easily another developer can re-run the model and obtain the same results".
+---
 
-Steps:
-	1. Start latency timer using `time.perf_counter()`.  
-	2. Check for reproducibility cues inside the cloned repo:
-	   - Environment specification files (`requirements.txt`, `environment.yml`, `setup.py`, `pyproject.toml`) → +0.4  
-	   - Random seed usage (`random.seed`, `torch.manual_seed`, `numpy.random.seed`) → +0.2  
-	   - Runnable artifacts like Jupyter notebooks (`.ipynb`) or an `examples/` folder → +0.2  
-	   - README mentions “reproduce”, “train”, “run experiment” → +0.2  
-	3. Sum weights (max = 1.0) and round to 4 decimals.  
+## Deployment
 
-Purpose:
-	Encourages well-documented, repeatable workflows and open-science practices.  
-	Repositories that clearly describe how to recreate results earn higher trust scores.
+- Designed for AWS Lambda + API Gateway
+- Uses S3 for registry persistence and artifact storage
+- CORS configured explicitly in the backend (API Gateway CORS disabled)
 
-# Reviewedness (New for Phase 2)
+---
 
-Measures "how much peer review and collaboration" the repository has undergone.
+## Validation & Testing
 
-Steps:
-	1. Start latency timer using `time.perf_counter()`.  
-	2. Inspect local git metadata for social signals:
-	   - Multiple contributors (`git shortlog -s`) → +0.4  
-	   - Merge commits (`git log --merges`) → +0.3  
-	   - Issue/discussion templates under `.github/ISSUE_TEMPLATE` → +0.2  
-	   - Optional: presence of `CONTRIBUTING.md` or `CODEOWNERS` → +0.1  
-	3. Cap score at 1.0 and return `(score, latency_ms)`.
+- **Automated end-to-end tests** (autograder)
+- **Manual AWS deployment validation** using CloudWatch logs
+- **Negative testing** for malformed inputs, unsupported artifact types, and missing resources
+- Consistent HTTP status code handling per instructor clarification
 
-Purpose:
-	Quantifies the level of community involvement and review—key indicators of software reliability and maintainability.  
-	High reviewedness implies the project has been seen and improved by multiple developers, reducing single-person risk.
+---
+
+## Notes on Phase 2 Compliance
+
+- License metric returns a **numeric suitability score**, not a string
+- Size score is a structured object with four deployment targets
+- Reviewedness gating is enforced where required by the spec
+- Tree score and lineage are extracted from HF metadata and configs
+- All required OpenAPI fields are populated
+
+---
+
+## License
+
+This project is developed for academic use as part of ECE 461 at Purdue University.
+
+---
+
+## Acknowledgements
+- Hugging Face Hub
+- GitHub API
+- AWS (Lambda, S3, CloudWatch)
+- FastAPI & Mangum
