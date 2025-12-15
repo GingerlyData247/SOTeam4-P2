@@ -1,3 +1,32 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# COMPONENT: STORAGE SERVICE
+# REQUIREMENTS SATISFIED: artifact storage, presigned download support, local fallback
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/services/storage.py
+
+Defines the storage service abstraction for artifact persistence.
+
+This module provides a unified interface for storing and retrieving
+artifact data, supporting both AWS S3–backed storage and a local
+filesystem fallback for development and testing. The storage mode is
+selected at runtime via environment variables.
+
+Key responsibilities:
+    - Store arbitrary byte data (ZIP files, binaries, text, etc.)
+    - Generate presigned URLs for artifact downloads
+    - Transparently switch between AWS S3 and local storage modes
+    - Centralize storage logic behind a simple service interface
+
+This service is used by ingestion and API layers to persist artifacts
+without coupling the application to a specific storage backend, ensuring
+Phase 2 compatibility across deployment environments.
+"""
 import os
 import boto3
 from botocore.client import Config
