@@ -1,3 +1,32 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# COMPONENT: IN-MEMORY MODEL REPOSITORY
+# REQUIREMENTS SATISFIED: artifact persistence abstraction for registry services
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/repositories/models_repo.py
+
+Defines an in-memory repository for storing and managing artifact records.
+
+This module provides a lightweight persistence abstraction used by the
+registry service during development, testing, and Phase 2 deployment.
+It supports basic CRUD-style operations, simple regex-based listing, and
+cursor-based pagination without relying on an external database.
+
+Key responsibilities:
+    - Create, retrieve, update, and archive artifact records
+    - Maintain artifacts in memory using unique identifiers
+    - Support regex-based filtering over artifact names and card text
+    - Provide simple cursor-based pagination for list operations
+    - Enable fast reset and count operations for testing and system reset
+
+This repository is intentionally simple and deterministic, making it
+suitable for unit testing, autograder evaluation, and local execution.
+"""
 from __future__ import annotations
 from typing import Optional, Dict, Any, List, Tuple
 import re
