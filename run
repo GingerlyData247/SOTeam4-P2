@@ -2,12 +2,12 @@
 
 # SWE 45000, PIN FALL 2025
 # TEAM 4
-# PHASE 1 PROJECT
+# PHASE 2 PROJECT
 
 # DISCLAIMER: This file contains code either partially or entirely written by
 # Artificial Intelligence.
 """
-Executable CLI 'run' for Phase 1.
+Executable CLI 'run' for Phase 2.
 
 Usage:
   ./run install       -> installs dependencies from requirements.txt
