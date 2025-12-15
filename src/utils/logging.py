@@ -1,3 +1,41 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# COMPONENT: CENTRALIZED LOGGING CONFIGURATION
+# REQUIREMENTS SATISFIED: Deterministic logging behavior, environment-controlled verbosity
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/utils/logging.py
+
+Provides a centralized logging configuration utility for the Phase 2 backend.
+This module configures a shared logger instance ("phase1_cli") whose behavior
+is fully controlled via environment variables, ensuring deterministic and
+autograder-compliant logging.
+
+Environment Variables:
+    LOG_LEVEL:
+        0 → Silent (no logs emitted)
+        1 → INFO level logging
+        2 → DEBUG level logging
+
+    LOG_FILE:
+        Optional path to a log file. If provided and valid, logs are written
+        to this file. Otherwise, logs fall back to standard error (stderr).
+
+Design Decisions:
+    - Logging is isolated from the root logger to prevent duplicate output.
+    - Existing handlers are cleared on setup to ensure idempotent behavior
+      across imports and reloads.
+    - The logger instance is created eagerly at import time so that all
+      modules can safely import and use the same configured logger.
+
+This utility is used throughout the system by metrics, services, routers,
+and middleware to ensure consistent, spec-aligned logging behavior during
+local development, automated testing, and deployment.
+"""
 # File: src/utils/logging.py
 import os
 import sys
