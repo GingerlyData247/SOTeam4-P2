@@ -1,3 +1,34 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# COMPONENT: API REQUEST / RESPONSE LOGGING MIDDLEWARE
+# REQUIREMENTS SATISFIED: backend observability and debugging support
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/api/middleware/log_requests.py
+
+Defines a custom ASGI middleware for detailed HTTP request and response logging.
+
+This middleware intercepts incoming HTTP requests and outgoing responses
+to capture full request metadata, bodies, response payloads, status codes,
+and end-to-end latency. Each request is tagged with a unique request ID
+to make tracing across logs easier during local development and AWS
+deployment.
+
+Key features:
+    - Logs HTTP method and request path
+    - Captures and prints request and response bodies
+    - Attempts structured JSON pretty-printing when possible
+    - Measures per-request latency in milliseconds
+    - Safely passes through non-HTTP ASGI events
+
+This middleware is intended for debugging, testing, and operational
+visibility during Phase 2 deployment. It is not user-facing and does not
+modify request or response behavior.
+"""
 import json
 import uuid
 import time
@@ -86,3 +117,4 @@ class DeepASGILogger:
         except:
             pass
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+
