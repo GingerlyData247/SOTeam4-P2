@@ -1,3 +1,33 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# METRIC: reviewedness
+# REQUIREMENTS SATISFIED: reviewedness metric score
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/metrics/reviewedness.py
+
+Computes the Reviewedness metric for a model artifact.
+
+This metric estimates how thoroughly a model has been reviewed and
+validated by the community by combining multiple signals from the
+Hugging Face ecosystem. These signals include model popularity,
+community engagement, and the presence of structured evaluation or
+documentation in the model card.
+
+Scoring factors:
+    - Download count as a proxy for adoption and exposure
+    - Like count as a measure of community approval
+    - Model card content indicating evaluation results, datasets,
+      licenses, or academic references
+
+The metric follows the Phase 2 specification and is designed to be
+fault-tolerant, always returning a bounded score and measured latency
+even when metadata retrieval fails.
+"""
 # src/metrics/reviewedness.py
 from __future__ import annotations
 import time
