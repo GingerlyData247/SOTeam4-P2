@@ -1,3 +1,22 @@
+# ---------------------------------------------------------------------------
+# Unit Tests: License Heuristic Metric
+#
+# This test suite validates the license scoring heuristic used to assess
+# model suitability based on declared licensing information.
+#
+# The tests cover:
+#   - Correct classification of permissive open-source licenses (e.g., MIT,
+#     Apache-2.0, BSD variants) with full score credit
+#   - Partial scoring for weak copyleft, Creative Commons, or non-commercial
+#     licenses
+#   - Minimal or zero scoring for unknown, missing, or empty license strings
+#   - Fallback behavior when license information is provided only via
+#     model card metadata instead of the primary license field
+#   - Safe handling of missing or unavailable Hugging Face model information
+#
+# Hugging Face API calls are fully mocked to ensure deterministic, offline-safe
+# execution and compliance with the Phase 2 Trustworthy Model Registry rubric.
+# ---------------------------------------------------------------------------
 # tests/unit/test_license_heuristic.py
 from unittest.mock import patch
 from src.metrics.license import metric, _license_score
