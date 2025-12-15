@@ -1,3 +1,20 @@
+# ---------------------------------------------------------------------------
+# Unit Tests: Dataset Link Finder Utility
+#
+# This test suite validates the behavior of the dataset link discovery utilities
+# used to identify training datasets associated with Hugging Face model artifacts.
+#
+# The tests cover:
+#   - Normalization of dataset references from raw strings and URLs
+#   - Extraction of dataset identifiers from Hugging Face model metadata
+#   - Fallback discovery of dataset links by parsing README content
+#   - Safe degradation and empty results when metadata or README data is missing
+#
+# External Hugging Face API calls and README downloads are mocked to ensure
+# deterministic execution and to verify robustness against network or
+# repository failures, as required by the Phase 2 Trustworthy Model Registry
+# specification.
+# ---------------------------------------------------------------------------
 import pytest
 from unittest.mock import patch, MagicMock
 from src.utils import dataset_link_finder as dlf
