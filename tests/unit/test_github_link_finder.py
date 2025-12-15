@@ -1,3 +1,21 @@
+# ---------------------------------------------------------------------------
+# Unit Tests: GitHub Link Finder Utility
+#
+# This test suite validates the behavior of the GitHub link discovery utility,
+# which attempts to extract a canonical GitHub repository URL from a Hugging
+# Face model README.
+#
+# The tests cover:
+#   - Successful extraction of GitHub links from README content
+#   - Safe handling of Hugging Face API failures and missing README files
+#   - Correct behavior when no GitHub link is present
+#   - Selection of the first valid GitHub link when multiple are found
+#   - Robustness against empty or malformed README content
+#
+# All external dependencies (Hugging Face Hub access and file I/O) are mocked
+# to ensure deterministic, offline-safe execution and compliance with the
+# Phase 2 Trustworthy Model Registry rubric.
+# ---------------------------------------------------------------------------
 import logging
 import pytest
 from src.utils.github_link_finder import find_github_url_from_hf
