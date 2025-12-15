@@ -1,3 +1,18 @@
+# tests/unit/test_run_cli.py
+#
+# SWE 45000 – Phase 2
+#
+# Unit tests for the unified CLI logic in src/run.py.
+#
+# These tests cover:
+# - URL classification logic for models, datasets, and code repositories
+# - CLI command branches (install, test, URL file processing)
+# - Graceful handling of missing input files and invalid arguments
+# - Dynamic metric loading and aggregation via compute_metrics_for_model
+#
+# External dependencies (filesystem access, subprocess calls, metrics,
+# and network-related utilities) are mocked to ensure deterministic,
+# fast, and isolated test execution.
 import io
 import json
 import sys
