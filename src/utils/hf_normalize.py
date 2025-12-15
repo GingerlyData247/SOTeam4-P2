@@ -1,3 +1,36 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# COMPONENT: HUGGING FACE IDENTIFIER NORMALIZATION
+# REQUIREMENTS SATISFIED: Canonical artifact identification and URL normalization
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/utils/hf_normalize.py
+
+Provides a utility function for normalizing Hugging Face model or dataset
+identifiers into a canonical, lowercase `owner/repo` format.
+
+This module accepts a wide range of valid Hugging Face references, including:
+    - Full HTTPS URLs
+    - URLs without protocol
+    - Identifiers with trailing slashes
+    - Identifiers containing tree/main or resolve/main paths
+    - Mixed-case owner or repository names
+    - URLs with query parameters or fragments
+
+All inputs are normalized into a consistent `owner/repo` string, which is
+required for:
+    - Consistent registry storage
+    - Metric computation
+    - Lineage resolution
+    - Autograder and spec compliance
+
+This utility is used throughout the ingestion, scoring, and metric pipelines
+to ensure deterministic handling of Hugging Face artifact identifiers.
+"""
 import re
 from urllib.parse import urlparse
 
