@@ -1,3 +1,21 @@
+# ---------------------------------------------------------------------------
+# Unit Tests: Dataset Quality Metric
+#
+# This test suite verifies the correctness and robustness of the dataset
+# quality metric, which evaluates the reliability and usefulness of datasets
+# associated with a Hugging Face model.
+#
+# The tests cover:
+#   - Extraction and normalization of dataset identifiers from URLs
+#   - Scoring of individual datasets using Hugging Face metadata
+#     (e.g., downloads, likes, and dataset cards)
+#   - Combination of dataset signals derived from model tags and README parsing
+#   - Graceful handling of invalid dataset references and API failures
+#
+# All external Hugging Face API interactions are mocked to ensure deterministic,
+# offline-safe execution and to comply with the Phase 2 Trustworthy Model Registry
+# grading and reproducibility requirements.
+# ---------------------------------------------------------------------------
 import pytest
 from unittest.mock import patch, MagicMock
 from src.metrics import dataset_quality as dq
