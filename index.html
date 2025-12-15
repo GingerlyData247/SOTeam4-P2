@@ -1,3 +1,26 @@
+<!--
+  index.html
+
+  SWE 45000 / ECE 461 – Phase 2
+  Trustworthy Model Registry (Frontend)
+
+  This file implements the static frontend user interface for the
+  Trustworthy Model Registry Phase 2 project.
+
+  The page allows users to:
+  - Submit Hugging Face model or repository URLs for ingestion and scoring
+  - View computed trustworthiness metrics and download artifacts
+  - Search and list registered model artifacts
+  - Visualize model lineage relationships
+  - Perform license compatibility checks against GitHub repositories
+  - Reset the registry during development and testing
+
+  The frontend communicates exclusively with the Phase 2 backend API
+  via HTTP requests and is deployed as a static site to Amazon S3.
+  All logic is client-side JavaScript, with no server-side rendering.
+
+  Team 4 • Fall 2025
+-->
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -581,6 +604,7 @@
     </script>
   </body>
 </html>
+
 
 
 
