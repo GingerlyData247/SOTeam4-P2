@@ -1,3 +1,33 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# METRIC: code_quality
+# REQUIREMENTS SATISFIED: code_quality metric score
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/metrics/code_quality.py
+
+Computes the Code Quality metric for a model artifact.
+
+This metric evaluates the structural and documentation quality of a
+Hugging Face model repository using available metadata and repository
+contents. The score reflects how well the model is organized, documented,
+and supported by common machine learning tooling.
+
+Scoring factors include:
+    - Presence of README and model card documentation
+    - Repository structure and configuration files
+    - Availability of examples or notebooks
+    - Popularity based on download counts
+    - Use of well-known ML libraries or pipelines
+
+The metric follows the Phase 2 specification and degrades safely when
+repository metadata cannot be retrieved, always returning a bounded
+score and measured latency.
+"""
 # src/metrics/code_quality.py
 from __future__ import annotations
 import time
