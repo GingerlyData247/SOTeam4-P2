@@ -1,3 +1,35 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# COMPONENT: METRIC SCORING SERVICE
+# REQUIREMENTS SATISFIED: metric computation, normalization, and rating aggregation
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/services/scoring.py
+
+Defines the scoring service responsible for computing Phase 2 model metrics.
+
+This module acts as the central orchestration layer for metric evaluation.
+It builds enriched resource representations for Hugging Face models,
+invokes individual metric implementations, normalizes results, and
+returns a consolidated rating structure that matches the ModelRating
+schema defined in the Phase 2 OpenAPI specification.
+
+Key responsibilities:
+    - Normalize Hugging Face model identifiers
+    - Build rich resource dictionaries with metadata, cards, configs,
+      datasets, GitHub links, and file size information
+    - Invoke all Phase 2 metrics in a consistent and deterministic manner
+    - Normalize metric outputs and latency values
+    - Produce a final rating dictionary compatible with API responses
+      and registry storage
+
+This service is used by ingestion logic and API routes to ensure all
+artifacts are scored uniformly and according to Phase 2 requirements.
+"""
 from __future__ import annotations
 from typing import Dict, Any
 import os
