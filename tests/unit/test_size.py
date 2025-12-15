@@ -1,3 +1,22 @@
+# tests/unit/test_size.py
+#
+# SWE 45000 – Phase 2
+#
+# Unit tests for model size–based compatibility scoring.
+#
+# This file validates the size scoring logic used to evaluate how well
+# a model fits different hardware environments (Raspberry Pi, Jetson Nano,
+# desktop PC, and AWS server) based on its total model size.
+#
+# The tests ensure:
+# - Full branch coverage of the internal normalization logic
+#   (minimum, maximum, and interpolated ranges)
+# - Correct unit conversions from bytes → MB → GB
+# - Proper clamping behavior at hardware-specific size thresholds
+# - Deterministic, hardware-aware scoring outputs in the range [0.0, 1.0]
+#
+# External dependencies are mocked or reimplemented locally to keep the
+# tests isolated, deterministic, and rubric-compliant.
 import unittest
 from unittest.mock import Mock, patch
 from typing import Dict, Any
