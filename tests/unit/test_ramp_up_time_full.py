@@ -1,3 +1,18 @@
+# tests/unit/test_ramp_up_time_full.py
+#
+# Unit tests for the ramp_up_time metric.
+#
+# This file validates:
+# - Boundary behavior of the internal _length_score helper
+# - Local README discovery across multiple filename variants
+# - Detection of installation instructions and code examples
+# - Score clamping at the maximum value of 1.0
+# - Graceful handling of missing files and unexpected errors
+# - Remote README fetching logic for GitHub repositories,
+#   including main → master fallback and network failures
+#
+# All tests are deterministic and use temporary directories
+# or mocking to avoid real filesystem or network dependencies.
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
