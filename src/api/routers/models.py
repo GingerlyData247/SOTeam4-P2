@@ -1,3 +1,37 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# COMPONENT: MODEL REGISTRY API ROUTES
+# REQUIREMENTS SATISFIED: baseline and extended artifact registry endpoints
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/api/routers/models.py
+
+Defines the primary FastAPI routes for interacting with the Trustworthy
+Model Registry.
+
+This module implements the core REST API used to ingest, query, rate,
+and manage model, dataset, and code artifacts. It integrates registry
+storage, metric computation, lineage analysis, and license validation
+to provide a complete backend interface aligned with the Phase 2
+OpenAPI specification.
+
+Key responsibilities:
+    - Artifact ingestion and creation (models, datasets, code)
+    - Artifact retrieval, update, deletion, and enumeration
+    - Model rating and metric exposure
+    - Lineage graph retrieval and dependency-based cost analysis
+    - License compatibility checks between models and code repositories
+    - System health, reset, and track-reporting endpoints
+
+This router acts as the central coordination layer between API clients
+and backend services such as the registry, scoring engine, storage
+provider, and Hugging Face metadata services. All routes are designed
+to be fault-tolerant and spec-compliant.
+"""
 # src/api/routers/models.py
 
 from __future__ import annotations
