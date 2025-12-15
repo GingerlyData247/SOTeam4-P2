@@ -1,3 +1,14 @@
+# tests/unit/test_repo_cloner.py
+#
+# Unit tests for the repository cloning utility.
+#
+# This test verifies that clone_repo_to_temp() behaves safely when a Git
+# clone operation fails by:
+# - Returning None instead of raising an exception
+# - Cleaning up the temporary directory via shutil.rmtree
+#
+# Git operations are fully mocked to avoid network access and filesystem
+# side effects, ensuring deterministic and isolated test execution.
 from src.utils.repo_cloner import clone_repo_to_temp
 from git import GitCommandError
 
