@@ -1,3 +1,26 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# METRIC: category
+# REQUIREMENTS SATISFIED: artifact categorization support
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/metrics/category.py
+
+Determines a high-level category for an artifact based on its source.
+
+This metric assigns a descriptive category to a model or code artifact
+using available metadata. For Hugging Face models, the category is
+derived from the model’s pipeline_tag when available. For GitHub-based
+artifacts, the category defaults to a code repository classification.
+
+The metric is designed to be lightweight, fast, and fault-tolerant,
+providing a best-effort classification while always returning a valid
+fallback value and measured latency.
+"""
 import time
 from typing import Any, Dict, Tuple
 from huggingface_hub import model_info
