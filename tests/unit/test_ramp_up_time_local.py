@@ -1,4 +1,16 @@
 # tests/unit/test_ramp_up_time_local.py
+#
+# Unit tests for the ramp_up_time metric (local-only scenarios).
+#
+# This file focuses exclusively on local README-based evaluation and verifies:
+# - Correct handling of an empty README (score should be 0.0)
+# - Length-based scoring when only word count contributes to the score
+# - Proper latency reporting as a non-negative integer
+#
+# These tests avoid any remote/network behavior and rely solely on
+# temporary directories and locally written README.md files to ensure
+# deterministic and isolated execution.
+# tests/unit/test_ramp_up_time_local.py
 from pathlib import Path
 from src.metrics.ramp_up_time import metric
 
