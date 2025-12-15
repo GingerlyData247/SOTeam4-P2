@@ -1,3 +1,33 @@
+# SWE 45000, PIN FALL 2025
+# TEAM 4
+# PHASE 2 PROJECT
+
+# COMPONENT: API SCHEMAS AND DATA MODELS
+# REQUIREMENTS SATISFIED: OpenAPI-compliant request/response schemas
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/schemas/models.py
+
+Defines Pydantic models used throughout the Trustworthy Model Registry API.
+
+This module contains the canonical request and response schemas for
+artifact creation, update, retrieval, pagination, and model rating.
+These schemas enforce data validation, provide clear typing guarantees,
+and ensure consistency with the Phase 2 OpenAPI specification.
+
+Key responsibilities:
+    - Define artifact creation, update, and output schemas
+    - Provide generic pagination models for list endpoints
+    - Define structured model rating schemas for Phase 2 metrics
+    - Ensure compatibility with OpenAPI documentation generation
+    - Centralize schema definitions used across routers and services
+
+These models form the contract between API clients and the backend and
+are critical for request validation, response serialization, and
+autograder compatibility.
+"""
 from __future__ import annotations
 from typing import Optional, List, Dict, Any, Generic, TypeVar
 from pydantic import BaseModel, Field
