@@ -1,4 +1,22 @@
 # tests/unit/test_reviewedness.py
+#
+# SWE 45000 – Phase 2
+#
+# Unit tests for the reviewedness metric.
+#
+# These tests verify that reviewedness is computed from multiple engagement
+# and documentation signals, including:
+# - Download count tiers
+# - Like count tiers
+# - Model card richness (datasets, metrics, language, arXiv references)
+#
+# The tests ensure:
+# - Individual scoring components behave as expected
+# - Scores combine correctly and are capped at 1.0
+# - Missing or unavailable metadata safely results in a score of 0.0
+#
+# External API calls are mocked to ensure deterministic, isolated testing.
+# tests/unit/test_reviewedness.py
 from unittest.mock import patch
 from types import SimpleNamespace
 import pytest
