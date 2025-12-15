@@ -1,229 +1,232 @@
-# SOTeam4 – Model Registry & Scoring API (Phase 2)
-
-ECE 461 – Software Engineering (Fall 2025)
-
-## Team Members
-- Wesley Cameron Todd
-- Esau Cortez
-- Ethan Surber
-- Sam Brahim
-
----
+# Trustworthy Model Registry
 
 ## Overview
-This project implements a **model registry and automated evaluation service** for machine learning models, designed for the ECE 461 Phase 2 final deliverable. The system allows users to ingest ML models (primarily from Hugging Face), compute a standardized set of quality metrics, store results in a registry, and retrieve ratings and artifacts via a REST API and web frontend.
 
-The goal is to help organizations quickly assess whether a model is **usable, reliable, reproducible, and legally compatible** before adoption.
+The **Trustworthy Model Registry (TMR)** is a cloud-native system for ingesting, evaluating, storing, and serving machine learning artifacts (models, datasets, and code) with explicit, machine-verifiable trust signals. It is designed for enterprise environments that require stronger guarantees than public registries such as npm or HuggingFace alone, including reproducibility, licensing compatibility, lineage transparency, and security-aware ingestion.
 
-The system consists of:
-- A **FastAPI backend** deployed on AWS (Lambda + API Gateway)
-- **S3-backed storage** for registry state and model artifacts
-- A **web frontend** for interactive usage
-- A **metrics engine** that computes all required Phase 2 scores
+The registry exposes a strictly **OpenAPI-compliant REST API** and a browser-based UI, and is deployed entirely on AWS using free-tier-compatible components. Automated CI/CD, testing, observability, and security analysis are integral parts of the system.
 
 ---
 
-## Deployed Endpoints
+## Links
+* **API**: https://c1r52eygxi.execute-api.us-east-2.amazonaws.com/docs
+* **Frontend**: http://sot4-model-registry-dev.s3-website.us-east-2.amazonaws.com/
 
-### API
-```
-https://c1r52eygxi.execute-api.us-east-2.amazonaws.com
-```
+## Key Capabilities
 
-### Web UI
-```
-http://sot4-model-registry-dev.s3-website.us-east-2.amazonaws.com/
-```
+### Artifact Lifecycle (Baseline)
 
----
+* **Upload**: Register models, datasets, or code artifacts via URL or direct upload.
+* **Ingest**: Pull and vet public HuggingFace models automatically.
+* **Rate**: Compute trust metrics and sub-scores for artifacts.
+* **Download**: Retrieve full artifacts or selected components (e.g., weights only).
+* **Enumerate & Search**: List all artifacts or search using regex over names and model cards.
+* **Delete**: Remove artifacts by ID.
+* **Reset**: Restore the registry to a clean default state.
 
-## Core Features
+### Trust & Governance Features
 
-### 1. Artifact Registry
-- Persistent registry stored in **S3** (`registry/registry.json`)
-- Supports create, retrieve, delete, enumerate, and count operations
-- Metadata preserved exactly as required by the Phase 2 spec
-- Hardened against malformed registry entries to avoid runtime failures
+* **Reproducibility scoring** (0, 0.5, 1.0)
+* **Reviewedness** based on GitHub PR review history
+* **Lineage graphs** derived from model metadata (e.g., `config.json`)
+* **Tree score** aggregation over parent models
+* **License compatibility checks** (fine-tune + inference)
+* **Size / cost estimation** prior to download
 
-### 2. Model Ingestion
-- Hugging Face model ingestion via URL
-- Normalization of HF IDs
-- Automatic metric computation during ingest
-- Lineage extraction (parent models) for tree score computation
+### Extended / Advanced Features (Track-dependent)
 
-### 3. Automated Model Rating
-- Computes all required Phase 2 metrics:
-  - Net score
-  - Ramp-up time
-  - Bus factor
-  - Performance claims
-  - License suitability
-  - Dataset & code score
-  - Dataset quality
-  - Code quality
-  - Reproducibility
-  - Reviewedness
-  - Tree score
-  - Size score (Raspberry Pi, Jetson Nano, Desktop PC, AWS Server)
-- Latency recorded per metric
-- Output strictly matches the `ModelRating` OpenAPI schema
-
-### 4. Artifact Download
-- Secure artifact download via **presigned S3 URLs**
-- Supports full artifact downloads
-- Returns correct HTTP status codes for rejected, missing, or malformed requests
-
-### 5. Cloud-Ready Architecture
-- **FastAPI** backend
-- **Mangum** adapter for AWS Lambda
-- **S3** for artifact storage and registry persistence
-- **CloudWatch-friendly request logging** via custom ASGI middleware
-- Local filesystem fallback for development and testing
+* Authentication and role-based access control (Security Track)
+* Sensitive model handling with pre-download JavaScript hooks
+* Package confusion attack detection
+* Performance benchmarking and bottleneck analysis
+* High-assurance testing and disaster-proofing
 
 ---
 
-## API Routes (Summary)
+## System Architecture
 
-All API routes are prefixed with `/api` unless noted.
-
-### Health & Admin
-- `GET /health` – Service health and uptime
-- `DELETE /reset` – Reset registry and scoring state
-- `GET /tracks` – Returns supported tracks
-
-### Artifact Queries
-- `POST /artifact/byRegEx` – Regex search over artifacts
-- `GET /artifact/byName/{name}` – Exact name lookup
-
-### Model Operations
-- `POST /artifact/model` – Ingest a model
-- `GET /artifact/model/{id}/rate` – Retrieve model rating
-- `GET /artifact/model/{id}/download` – Download model artifact
-
-### S3 Utility Routes
-- `POST /api/s3/put-text`
-- `GET /api/s3/get-text`
-- `POST /api/s3/upload`
-
----
-
-## API Baseline Endpoints
-
-### Registry & Artifact APIs
-- `POST /api/artifact/{artifact_type}` – Upload artifact
-- `GET /api/artifact/{artifact_type}` – Enumerate artifacts
-- `GET /api/artifact/{artifact_type}/{id}` – Retrieve artifact metadata
-- `DELETE /api/artifact/{artifact_type}/{id}` – Delete artifact
-
-### Rating
-- `GET /api/artifact/{artifact_type}/rate` – Compute or retrieve model rating
-
-### Download
-- `GET /api/artifact/{artifact_type}/download` – Download artifact
-
-### Utility
-- `GET /env` – Environment diagnostics (debug only)
-
-All baseline endpoints are implemented to **100% completeness** per the Phase 2 specification and validated via automated autograder tests and manual AWS deployment testing.
-
----
-
-## Architecture
+### High-Level Architecture
 
 ```
-Client (Browser)
-   │
-   ▼
-Frontend (S3 Static Site)
-   │
-   ▼
-API Gateway
-   │
-   ▼
-AWS Lambda (FastAPI + Mangum)
-   │
-   ├── Metrics Engine
-   ├── Registry Service (S3)
-   ├── Storage Service (S3 / Local)
-   └── Hugging Face + GitHub APIs
+Client (UI / API)
+        |
+        v
+FastAPI Application (REST, OpenAPI)
+        |
+        +--> Registry Service (metadata, lineage)
+        +--> Scoring Service (metrics computation)
+        +--> Storage Service (artifacts)
+        |
+        v
+AWS Infrastructure
 ```
+
+### AWS Components
+
+* **AWS Lambda**: Stateless execution of the API backend
+* **Amazon API Gateway**: Public REST interface
+* **Amazon S3**: Artifact storage (models, datasets, code, and registry.json)
+* **CloudWatch**: Logs, metrics, and system health
+
+All components are selected to remain within AWS Free Tier limits.
 
 ---
 
-## Environment Variables
+## API Overview
 
-The following environment variables are required or supported:
+The system fully complies with the provided OpenAPI specification. Below is a functional summary of major endpoints.
+
+### Artifact Management
+
+* `POST /artifact` – Upload an artifact
+* `POST /artifact/ingest` – Ingest a public HuggingFace model
+* `GET /artifact/{type}/{id}` – Get artifact by ID
+* `GET /artifact/byName/{name}` – Get artifacts by exact name
+* `DELETE /artifact/{type}/{id}` – Delete artifact
+
+### Rating & Analysis
+
+* `GET /artifact/{type}/{id}/rate` – Compute and return trust metrics
+* `GET /artifact/{type}/{id}/lineage` – Retrieve lineage graph
+* `GET /artifact/{type}/{id}/cost` – Size and cost estimation
+* `POST /artifact/license-check` – License compatibility analysis
+
+### Enumeration & Search
+
+* `GET /artifacts/{type}` – Enumerate artifacts (paged)
+* `GET /artifacts/search` – Regex-based search
+
+### System & Ops
+
+* `GET /health` – System health and recent activity
+* `DELETE /reset` – Reset registry to default state
+
+Authentication headers are required where specified by the OpenAPI schema.
+
+---
+
+## CI/CD Pipeline
+
+### Continuous Integration (CI)
+
+Implemented using **GitHub Actions**:
+
+* Triggered on every pull request
+* Runs unit, feature, and end-to-end tests
+* Enforces minimum coverage thresholds
+* Performs linting and static checks
+
+### Continuous Deployment (CD)
+
+* Triggered on merge to the main branch
+* Automatically deploys the service to AWS
+* Verifies successful startup and health endpoint
+
+### Dependency & Code Quality Tooling
+
+* **Dependabot** for dependency updates
+* **GitHub Copilot Auto-Review** for automated PR feedback
+* **Microsoft Accesibility Insights** for ADA compliance testing
+
+---
+
+## Security & Reliability
+
+* Designed using **STRIDE threat modeling**
+* Risks analyzed against **OWASP Top 10**
+* Input validation and strict schema enforcement
+* Explicit handling of malicious or non-compliant artifacts
+* CloudWatch-based logging and monitoring
+
+Where enabled, authentication tokens expire after a fixed time or number of API calls.
+
+---
+
+## Local Development Setup
+
+### Prerequisites
+
+* Python 3.11+
+* Git
+* AWS account (free tier)
+
+### Installation
 
 ```bash
-# AWS
-S3_BUCKET=<bucket-name>
-AWS_REGION=us-east-2
-
-# Optional tokens (strongly recommended)
-HUGGINGFACE_HUB_TOKEN=<token>
-GITHUB_TOKEN=<token>
-
-# Local development
-LOCAL_STORAGE=1
-```
-
----
-
-## Local Development
-
-### Requirements
-- Python 3.12+
-- AWS credentials (for S3 mode)
-
-### Install
-```bash
+git clone <repository-url>
+cd trustworthy-model-registry
+python -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Run Locally
+### Configuration
+
+Set required environment variables:
+
 ```bash
-uvicorn src.main:app --reload
+export AWS_REGION=us-east-2
+export STORAGE_BUCKET=<your-s3-bucket>
+export AUTH_TOKEN=<default-admin-token>
 ```
 
-If `LOCAL_STORAGE=1` is set, artifacts are written to `/tmp/local-artifacts` instead of S3.
+### Running Locally
+
+```bash
+uvicorn src.run:app --reload
+```
+
+The API will be available at:
+
+```
+http://localhost:8000
+```
+
+Swagger UI:
+
+```
+http://localhost:8000/docs
+```
 
 ---
 
 ## Deployment
 
-- Designed for AWS Lambda + API Gateway
-- Uses S3 for registry persistence and artifact storage
-- CORS configured explicitly in the backend (API Gateway CORS disabled)
+Deployment is handled automatically via GitHub Actions. For manual deployment or debugging:
+
+1. Package the application
+2. Deploy to AWS Lambda
+3. Attach API Gateway routes
+4. Verify `/health` endpoint
+
+All deployments assume stateless execution with externalized storage.
 
 ---
 
-## Validation & Testing
+## Testing
 
-- **Automated end-to-end tests** (autograder)
-- **Manual AWS deployment validation** using CloudWatch logs
-- **Negative testing** for malformed inputs, unsupported artifact types, and missing resources
-- Consistent HTTP status code handling per instructor clarification
+* **Unit Tests**: Component-level logic
+* **Feature Tests**: End-to-end API behavior
+* **System Tests**: Full workflows (upload → rate → download)
+
+Coverage reports are generated as part of CI.
 
 ---
 
-## Notes on Phase 2 Compliance
+## Observability
 
-- License metric returns a **numeric suitability score**, not a string
-- Size score is a structured object with four deployment targets
-- Reviewedness gating is enforced where required by the spec
-- Tree score and lineage are extracted from HF metadata and configs
-- All required OpenAPI fields are populated
+* `/health` endpoint exposes recent activity
+* CloudWatch logs capture all requests, responses, and errors
+* Metrics support performance and reliability analysis
+
+---
+
+## Project Purpose & Value
+
+The Trustworthy Model Registry goes beyond traditional package managers by embedding **trust, compliance, and governance directly into the artifact lifecycle**. Instead of relying on popularity or manual review, engineering teams gain automated, repeatable assurances about the models they deploy—reducing operational risk, legal exposure, and time-to-production.
 
 ---
 
 ## License
 
-This project is developed for academic use as part of ECE 461 at Purdue University.
-
----
-
-## Acknowledgements
-- Hugging Face Hub
-- GitHub API
-- AWS (Lambda, S3, CloudWatch)
-- FastAPI & Mangum
+This project is provided for academic and demonstration purposes as part of ECE 461/30861 Software Engineering.
