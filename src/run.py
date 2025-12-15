@@ -1,10 +1,54 @@
-#!/usr/bin/env python3
-
 # SWE 45000 – Fall 2025
-# TEAM 4 — Phase 1 / Phase 2 shared logic
-# This file lives in /src so AWS Lambda can import it.
-# The original root-level `run` CLI remains unchanged.
+# TEAM 4
+# PHASE 1 / PHASE 2 SHARED COMPONENT
 
+# COMPONENT: METRIC EXECUTION ENGINE & CLI BACKEND
+# REQUIREMENTS SATISFIED:
+#   - Phase 1 metric discovery and execution
+#   - Phase 2 backend metric computation (imported by API services)
+#   - Safe metric isolation with timeouts
+#   - Unified CLI for install, test, and URL-based evaluation
+#   - Deterministic metric loading for autograder compatibility
+
+# DISCLAIMER: This file contains code either partially or entirely written by
+# Artificial Intelligence
+"""
+src/run.py
+
+This module serves as the core execution engine for metric computation in both
+Phase 1 (CLI-based evaluation) and Phase 2 (API-backed scoring) of the
+Trustworthy Model Registry project.
+
+Primary Responsibilities:
+    - Dynamically discover and load metric modules from src.metrics
+    - Safely execute each metric with timeouts and error isolation
+    - Aggregate per-metric scores and latencies into a net score
+    - Provide a stable compute_metrics_for_model() interface used by:
+        • Phase 1 CLI
+        • Phase 2 ScoringService
+        • Phase 2 ingest and rating endpoints
+    - Support Phase 1 testing and installation workflows
+
+Design Constraints & Safety Measures:
+    - Metrics are executed in isolation with strict timeouts to prevent hangs.
+    - All stdout/stderr during metric imports are suppressed to keep output clean.
+    - Metric failures degrade gracefully to (0.0, 0 ms) without crashing execution.
+    - Repository cloning is explicitly disabled in Phase 2 to ensure reproducibility.
+    - Size, license, lineage, and metadata extraction rely only on safe APIs.
+
+CLI Capabilities:
+    - `run install` → installs dependencies
+    - `run test`    → executes test suite with coverage reporting
+    - `run <file>`  → processes a file containing URLs (Phase 1 behavior)
+
+Deployment Context:
+    - This file lives under /src so it can be imported directly by AWS Lambda.
+    - The original root-level CLI entrypoint remains unchanged.
+    - Path normalization logic ensures compatibility across local, CI, and Lambda.
+
+This file intentionally centralizes all metric orchestration logic so that
+both CLI and API layers remain thin and deterministic.
+"""
 from __future__ import annotations
 from src.utils.logging import logger
 import argparse
